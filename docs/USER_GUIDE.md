@@ -288,7 +288,8 @@ Panonun altındaki sekmeler:
 - **Uzun transaction'lar:** Şu an eşikten uzun süredir açık olan transaction'lar. Kimseyi bloklamasalar da listelenirler
   (ayrıntılar [9a](#9a-uzun-transactionlar) bölümünde).
 - **Veritabanları:** Her veritabanındaki session, aktif, `idle in transaction` ve lock bekleyen sayıları.
-- **Son olaylar:** Olay açıldı, önem arttı, düzelme başladı, veri alınamıyor gibi olaylar.
+- **Son olaylar:** Olay açıldı, önem arttı, düzelme başladı, veri alınamıyor, sunucu yeniden başladı gibi olaylar. Liste
+  yerel kayıttan okunur. Uygulamayı kapatıp açsan da, **Kaydet ve uygula**'ya bassan da kaybolmaz.
 
 ---
 
@@ -331,6 +332,28 @@ Bir transaction eşikten (varsayılan **10 dakika**, Ayarlar → Eşikler → "U
 - **Bağlantı kopması ya da uyku** bir transaction'ı "bitti" saymaz. Ancak uzun süren bir kesintide bitip yeniden başlayan
   bir transaction görülemez.
 - **Ek yük yok.** Bu bilgilerin hepsi zaten okunan `pg_stat_activity` verisinden çıkar.
+- Süren bir kayıt dakikada bir güncellenir. Uygulama aniden kapansa bile süre en fazla bir dakika eksik görünür.
+
+### 9b. Lock beklemeleri (kısa olanlar dahil)
+
+Ana penceredeki **Lock beklemeleri** sekmesi, en az **5 saniye** (Ayarlar → Eşikler → "Kaydedilecek en kısa lock
+beklemesi") süren **her** lock beklemesini kaydeder. Buna 30 saniye eşiğini aşmadığı için olay açmayan kısa beklemeler de
+dahildir. "Panoda bir sorgu göründü, birkaç saniye sonra kayboldu" dediğin durumlar burada kalır.
+
+| Sütun | Anlamı |
+|---|---|
+| İlk görüldü | Beklemenin ilk görüldüğü örnek |
+| En uzun bekleme | Sorgunun başlangıcından, beklerken görüldüğü son ana kadar geçen süre |
+| Bloklayan | Doğrudan bekleten PID(ler) (`pg_blocking_pids`) |
+| Kök bloklayıcı | Zincirin başı: pid, durum, kullanıcı, istemci, transaction süresi. Altta son SQL'i (şüpheli) |
+| Bitiş | *bekleme bitti* (lock alındı ya da sorgu bitti), *session kayboldu* (bitti veya sonlandırıldı), *sonu görülmedi* (PgMonitor o sırada kapandı) |
+
+- Bir satıra tıklayınca altta iki kutu açılır: **bekleyen sorgu** ve **kök bloklayıcının son sorgusu**.
+- Olay açmaz, mail atmaz. Prod'a ek sorgu da göndermez; mevcut örneklerden çıkar.
+- **Örnekleme aralığından kısa beklemeler görülmeyebilir.** Varsayılan aralık 10 saniye olduğu için 5–10 saniyelik
+  bir bekleme bazen iki örneğin arasına düşer.
+- Örnek başına en fazla 50 bekleyen için "kim blokluyor" sorulur. Daha fazlası varsa en yenilerin "Bloklayan" sütunu
+  boş kalır.
 
 ---
 

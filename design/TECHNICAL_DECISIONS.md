@@ -194,6 +194,23 @@ nothing touches user tables or takes heavyweight locks.
 product owner wants to see it after the DB team cleans up. Not alerting keeps the mail channel for real incidents. The
 tracker reuses the existing activity query, so there is no extra load.
 
+## D20 - Record every lock wait ≥ 5 s; persistent event list (2026-11-17)
+**Decision.**
+- Every heavyweight-lock wait of at least `RecordLockWaitsFrom` (default 5 s, minimum 1 s) is recorded, including waits
+  that never open an incident.
+- Identity is `(pid, backend_start, query_start)` of the waiting statement. Each record holds the direct blockers, the
+  root found by following "blocked by" upwards (cycle-safe), the root's state, user, client, transaction start and SQL,
+  and the waiter's SQL.
+- Storage: one row per wait in `lock_wait` (schema v4). The row is written when the wait reaches the minimum, updated at
+  most once a minute while it lasts, and closed with "wait ended" or "session gone".
+- The dashboard's "Son olaylar" list is read from the SQLite `event` table (including events outside incidents), so it
+  survives restarts and settings changes. Events outside incidents follow the incident retention.
+- Fix in the same change: the long-transaction and lock-wait records now refresh `last_seen` at least once a minute.
+  Before, a long wait kept its first-seen duration in storage until it ended. Found by a test.
+
+**Why.** The product owner saw a lock wait appear and vanish from the dashboard with no trace. These records stay local
+and add no query or session to the server.
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.

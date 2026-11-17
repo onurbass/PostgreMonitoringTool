@@ -53,6 +53,17 @@ public static class Fmt
         _ => k.ToString(),
     };
 
+    /// <summary>Short end text for tables; the full reason is explained in the guide.</summary>
+    public static string End(string? reason) => reason switch
+    {
+        null => "",
+        _ when reason.StartsWith("session kayboldu", StringComparison.Ordinal) => "session kayboldu",
+        _ when reason.StartsWith("bekleme bitti", StringComparison.Ordinal) => "bekleme bitti",
+        _ when reason.StartsWith("transaction bitti", StringComparison.Ordinal) => "transaction bitti",
+        _ when reason.StartsWith("uygulama kapandı", StringComparison.Ordinal) => "sonu görülmedi",
+        _ => reason,
+    };
+
     public static string Visibility(Visibility v) => v switch
     {
         Core.Model.Visibility.Full => "Tam",
@@ -135,8 +146,32 @@ public sealed record LongTxRow(
             s.State ?? "-", s.WaitEventType is null ? "" : $"{s.WaitEventType}:{s.WaitEvent}",
             Fmt.Age(at, s.TransactionStart), Fmt.Age(at, s.StateChange), Fmt.Age(at, s.QueryStart),
             Fmt.Time(s.FirstSeen),
-            s.EndedAt is null ? "sürüyor" : $"{Fmt.Time(s.LastSeen)} son görüldü – {s.EndReason}",
+            s.EndedAt is null ? "sürüyor" : $"{Fmt.Time(s.LastSeen)} – {Fmt.End(s.EndReason)}",
             Fmt.OneLine(s.Query), s.Query ?? "");
+    }
+}
+
+/// <summary>One recorded lock wait for the "Lock beklemeleri" history.</summary>
+public sealed record LockWaitRow(
+    string FirstSeen, string MaxWait, string Database, string Pid, string User, string Client, string Wait,
+    string BlockedBy, string Root, string End, string Sql, string FullSql, string RootSql)
+{
+    public static LockWaitRow From(Infrastructure.Storage.StoredLockWait w, IReadOnlyDictionary<string, string> apps)
+    {
+        ArgumentNullException.ThrowIfNull(w);
+        var root = w.RootPid switch
+        {
+            null => "-",
+            0 => "prepared transaction",
+            var p => $"pid {p.Value.ToString(CultureInfo.InvariantCulture)}" +
+                     (w.RootState is null ? " (örnekte yok)" : $" – {w.RootState}, {w.RootUser ?? "-"}, {w.RootClient ?? "-"}, tx {Fmt.Age(w.LastSeen, w.RootTransactionStart)}"),
+        };
+        return new(
+            Fmt.Time(w.FirstSeen), IncidentEngine.Format(w.MaxWait), Fmt.Db(w.Database, apps), w.Pid.ToString(CultureInfo.InvariantCulture),
+            w.UserName ?? "-", w.ClientAddress ?? "-", w.WaitEvent ?? "-",
+            w.Blockers.Count == 0 ? "-" : string.Join(",", w.Blockers), root,
+            w.EndedAt is null ? "sürüyor" : Fmt.End(w.EndReason),
+            Fmt.OneLine(w.Query), w.Query ?? "", w.RootQuery ?? "");
     }
 }
 
@@ -144,6 +179,13 @@ public sealed record DatabaseRow(string Database, int Sessions, int Active, int 
 
 public sealed record EventRow(string Time, string Kind, string Severity, string Incident, string Detail)
 {
+    public static EventRow From(Infrastructure.Storage.StoredEvent e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        return new(Fmt.Time(e.At), Fmt.Event(e.Kind), Fmt.Severity(e.Severity),
+            e.IncidentId is { } id ? "#" + id.ToString(CultureInfo.InvariantCulture) : "", e.Detail);
+    }
+
     public static EventRow From(IncidentEvent e) => new(
         Fmt.Time(e.At),
         Fmt.Event(e.Kind),

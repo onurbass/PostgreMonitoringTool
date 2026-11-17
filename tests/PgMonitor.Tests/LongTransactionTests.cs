@@ -93,6 +93,19 @@ public sealed class LongTransactionTests : IDisposable
     }
 
     [Fact]
+    public void Stored_record_keeps_up_while_the_transaction_lasts()
+    {
+        using var store = new SqliteMonitorStore(Path.Combine(_dir, "keep.db"));
+        var tracker = new LongTransactionTracker();
+        var xs = T0.AddMinutes(-11);
+        for (var i = 0; i <= 30; i++) // 5 minutes, one sample every 10 s, nothing changes
+        {
+            store.RecordLongTransactions(tracker.Update(Sample(T0.AddSeconds(10 * i), Tx(1, xs, T0)), Threshold, ChangeEvery));
+        }
+        Assert.Equal(T0.AddMinutes(5), Assert.Single(store.ListLongTransactions()).LastSeen);
+    }
+
+    [Fact]
     public void Vanished_session_and_finished_transaction_end_with_different_reasons()
     {
         var tracker = new LongTransactionTracker();

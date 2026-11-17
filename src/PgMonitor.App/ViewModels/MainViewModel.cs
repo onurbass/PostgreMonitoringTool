@@ -28,12 +28,14 @@ public sealed partial class MainViewModel : ObservableObject
         Incidents = new IncidentsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
         Settings = new SettingsViewModel();
         LongTransactions = new LongTransactionsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
+        LockWaits = new LockWaitsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
         _service.SnapshotReceived += OnSnapshot;
     }
 
     public DashboardViewModel Dashboard { get; }
     public IncidentsViewModel Incidents { get; }
     public LongTransactionsViewModel LongTransactions { get; }
+    public LockWaitsViewModel LockWaits { get; }
     public SettingsViewModel Settings { get; }
 
     /// <summary>Raised on the UI thread when an incident opens (for the tray balloon).</summary>
@@ -60,6 +62,8 @@ public sealed partial class MainViewModel : ObservableObject
             _lastLongTxCount = -1;
             Incidents.Refresh();
             LongTransactions.Refresh();
+            LockWaits.Refresh();
+            RefreshEvents();
             PowerHelper.KeepAwake(settings.KeepAwakeOnAcPower);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.IO.IOException or UnauthorizedAccessException)
@@ -103,12 +107,35 @@ public sealed partial class MainViewModel : ObservableObject
                 _lastLongTxCount = s.LongTransactions.Count;
                 LongTransactions.Refresh(); // a long transaction started or ended
             }
+            if (s.LockWaitChanges > 0)
+            {
+                LockWaits.Refresh();
+            }
+            if (s.NewEvents.Count > 0)
+            {
+                RefreshEvents();
+            }
             foreach (var e in s.RecentEvents.Where(e => e.At == s.Sample?.SampledAt &&
                                                         e.Kind is Core.Incidents.IncidentEventKind.Opened or Core.Incidents.IncidentEventKind.Reopened))
             {
                 IncidentOpened?.Invoke(this, $"Olay #{e.IncidentId}: {e.Detail}");
             }
         });
+    }
+
+    private void RefreshEvents()
+    {
+        try
+        {
+            if (_service.Store is { } store)
+            {
+                Dashboard.SetEvents(store.ListRecentEvents(50).Select(EventRow.From));
+            }
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // storage problems are already shown as a warning on the dashboard
+        }
     }
 
     // ------------------------------------------------------------------ settings commands

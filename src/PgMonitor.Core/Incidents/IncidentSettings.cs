@@ -38,6 +38,12 @@ public sealed record IncidentSettings
     /// </summary>
     public TimeSpan LongTransactionThreshold { get; init; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Every lock wait at least this long is recorded (who waited, who blocked, the root), even below
+    /// <see cref="LockWaitThreshold"/>. Advisory: no incident, no mail.
+    /// </summary>
+    public TimeSpan RecordLockWaitsFrom { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>Two successful samples further apart than this are treated as a gap (sleep, VPN drop).</summary>
     public TimeSpan MaxSampleGap { get; init; } = TimeSpan.FromSeconds(30);
 }

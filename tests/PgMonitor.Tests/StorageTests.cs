@@ -63,7 +63,7 @@ public sealed class StorageTests : IDisposable
         using (new SqliteMonitorStore(DbPath))
         {
         }
-        Assert.Equal(3, QueryLong("PRAGMA user_version"));
+        Assert.Equal(4, QueryLong("PRAGMA user_version"));
         using var c = new SqliteConnection($"Data Source={DbPath};Pooling=False");
         c.Open();
         using var cmd = c.CreateCommand();
@@ -82,7 +82,7 @@ public sealed class StorageTests : IDisposable
         {
             c.Open();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "DROP TABLE outbox; DROP TABLE long_tx; PRAGMA user_version = 1;"; // what an M3-era file looks like
+            cmd.CommandText = "DROP TABLE outbox; DROP TABLE long_tx; DROP TABLE lock_wait; PRAGMA user_version = 1;"; // what an M3-era file looks like
             cmd.ExecuteNonQuery();
         }
 
@@ -93,7 +93,7 @@ public sealed class StorageTests : IDisposable
             Assert.Equal(new OutboxCounts(1, 0, 0), store.MailCounts());
             Assert.Empty(store.ListLongTransactions());
         }
-        Assert.Equal(3, QueryLong("PRAGMA user_version"));
+        Assert.Equal(4, QueryLong("PRAGMA user_version"));
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class StorageTests : IDisposable
         {
             c.Open();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "DROP TABLE long_tx; PRAGMA user_version = 2;"; // what an M5/M6-era file looks like
+            cmd.CommandText = "DROP TABLE long_tx; DROP TABLE lock_wait; PRAGMA user_version = 2;"; // what an M5/M6-era file looks like
             cmd.ExecuteNonQuery();
         }
 
@@ -116,7 +116,7 @@ public sealed class StorageTests : IDisposable
             Assert.Equal(3, Assert.Single(store.ListIncidents()).Id);
             Assert.Empty(store.ListLongTransactions());
         }
-        Assert.Equal(3, QueryLong("PRAGMA user_version"));
+        Assert.Equal(4, QueryLong("PRAGMA user_version"));
     }
 
     [Fact]

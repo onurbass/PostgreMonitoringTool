@@ -275,6 +275,47 @@
                 </Grid>
             </TabItem>
 
+            <!-- ============================================================ LOCK WAITS -->
+            <TabItem Header="  Lock beklemeleri  " DataContext="{Binding LockWaits}">
+                <DockPanel Margin="8">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Content="Yenile" Command="{Binding RefreshCommand}" Margin="0"/>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource H2}" Margin="0,0,0,2" Text="Kaydedilen tüm lock beklemeleri (olay açmayan kısa beklemeler dahil)"/>
+                            <TextBlock Foreground="{StaticResource Muted}" TextWrapping="Wrap"
+                                       Text="Ayarlardaki süreden (varsayılan 5 sn) uzun her lock beklemesi: kim bekledi, kim blokladı, zincirin başı kimdi, ne zaman bitti. Örnekleme aralığından kısa beklemeler görülmeyebilir."/>
+                            <TextBlock Foreground="{StaticResource Muted}" Text="{Binding Summary}"/>
+                        </StackPanel>
+                    </DockPanel>
+                    <Grid DockPanel.Dock="Bottom" Height="110" Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" Text="BEKLEYEN SORGU"/>
+                            <TextBox Style="{StaticResource SqlBox}" Text="{Binding Selected.FullSql, Mode=OneWay}"/>
+                        </DockPanel>
+                        <DockPanel Grid.Column="2">
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" Text="KÖK BLOKLAYICININ SON SORGUSU (şüpheli)"/>
+                            <TextBox Style="{StaticResource SqlBox}" Text="{Binding Selected.RootSql, Mode=OneWay}"/>
+                        </DockPanel>
+                    </Grid>
+                    <DataGrid ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" Margin="0,8,0,0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="İlk görüldü" Binding="{Binding FirstSeen}"/>
+                            <DataGridTextColumn Header="En uzun bekleme" Binding="{Binding MaxWait}"/>
+                            <DataGridTextColumn Header="Veritabanı" Binding="{Binding Database}"/>
+                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}"/>
+                            <DataGridTextColumn Header="Kullanıcı" Binding="{Binding User}"/>
+                            <DataGridTextColumn Header="İstemci" Binding="{Binding Client}"/>
+                            <DataGridTextColumn Header="Bekleme" Binding="{Binding Wait}"/>
+                            <DataGridTextColumn Header="Bloklayan" Binding="{Binding BlockedBy}"/>
+                            <DataGridTextColumn Header="Kök bloklayıcı" Binding="{Binding Root}"/>
+                            <DataGridTextColumn Header="Bitiş" Binding="{Binding End}"/>
+                            <DataGridTextColumn Header="SQL (bekleyen)" Binding="{Binding Sql}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
             <!-- ============================================================ LONG TRANSACTIONS -->
             <TabItem Header="  Uzun transaction'lar  " DataContext="{Binding LongTransactions}">
                 <DockPanel Margin="8">
@@ -382,7 +423,8 @@
                             <TextBlock Style="{StaticResource H2}" Text="Eşikler"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="4" Text="Kaydedilecek en kısa lock beklemesi (sn)" VerticalAlignment="Center"/><TextBox Grid.Row="4" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding RecordLockWaitSeconds}" ToolTip="Bu süreden uzun her lock beklemesi 'Lock beklemeleri' sekmesine kaydedilir (olay açmaz, mail atmaz)"/>
                                 <TextBlock Grid.Row="3" Text="Uzun transaction eşiği (dk)" VerticalAlignment="Center"/><TextBox Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding LongTxMinutes}" ToolTip="Bu süreden uzun açık transaction'lar listelenir ve kaydedilir (olay açmaz, mail atmaz)"/>
                                 <TextBlock Text="Lock bekleme eşiği (sn)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding LockWaitSeconds}"/>
                                 <TextBlock Grid.Row="1" Text="Yüksek: bekleyen sayısı ≥" VerticalAlignment="Center"/><TextBox Grid.Row="1" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding HighWaiters}"/>

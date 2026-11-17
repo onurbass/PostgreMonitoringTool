@@ -57,6 +57,34 @@ public sealed record StorageSettings
 /// <summary>Result of a retention / size-cap pass.</summary>
 public sealed record MaintenanceResult(int AggregatesDeleted, int IncidentsDeleted, int SamplesThinned, bool OverCapWithOpenIncidents, StorageReport Report);
 
+/// <summary>One recorded lock wait (any wait of at least the minimum duration, incident or not).</summary>
+public sealed record StoredLockWait(
+    int Pid,
+    DateTimeOffset? BackendStart,
+    DateTimeOffset QueryStart,
+    string? Database,
+    string? UserName,
+    string? ApplicationName,
+    string? ClientAddress,
+    string? WaitEvent,
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen,
+    DateTimeOffset? EndedAt,
+    string? EndReason,
+    IReadOnlyList<int> Blockers,
+    int? RootPid,
+    string? RootDatabase,
+    string? RootUser,
+    string? RootClient,
+    string? RootState,
+    DateTimeOffset? RootTransactionStart,
+    string? Query,
+    string? RootQuery)
+{
+    /// <summary>Longest observed wait: from the statement start to the last sample that still showed it waiting.</summary>
+    public TimeSpan MaxWait => LastSeen - QueryStart;
+}
+
 /// <summary>A transaction that stayed open longer than the threshold (advisory record, no incident).</summary>
 public sealed record StoredLongTransaction(
     int Pid,
@@ -89,6 +117,14 @@ public sealed record OutboxCounts(int Pending, int Sent, int Failed);
 /// <summary>Persistence for aggregates and incident evidence. One instance per database file; single writer.</summary>
 public interface IMonitorStore : IDisposable
 {
+    /// <summary>Inserts or updates lock-wait records (one row per waiting statement).</summary>
+    void RecordLockWaits(IReadOnlyList<PgMonitor.Core.Locks.LockWaitEvent> events);
+
+    IReadOnlyList<StoredLockWait> ListLockWaits(int limit = 1000);
+
+    /// <summary>Most recent events of any kind, newest first (survives restarts).</summary>
+    IReadOnlyList<StoredEvent> ListRecentEvents(int limit = 50);
+
     /// <summary>Inserts or updates long-transaction records (one row per transaction).</summary>
     void RecordLongTransactions(IReadOnlyList<PgMonitor.Core.Transactions.LongTxEvent> events);
 

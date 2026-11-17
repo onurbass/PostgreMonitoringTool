@@ -113,7 +113,6 @@ public sealed partial class DashboardViewModel : ObservableObject
                 g.Count(r => r.State == "active"),
                 g.Count(r => r.IsIdleInTransaction),
                 g.Count(r => r.IsWaitingOnLock))));
-        Replace(Events, s.RecentEvents.Reverse().Take(30).Select(EventRow.From));
 
         LongTxCount = s.LongTransactions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
         LongTxHeader = $"Uzun transaction'lar ({s.LongTransactions.Count})";
@@ -121,6 +120,9 @@ public sealed partial class DashboardViewModel : ObservableObject
         Replace(LongTransactions, s.LongTransactions.Select(t => LongTxRow.From(t, now, apps)));
         SelectedLongTx = LongTransactions.FirstOrDefault(r => r.Pid == keep);
     }
+
+    /// <summary>"Son olaylar" comes from SQLite, so nothing disappears when monitoring restarts.</summary>
+    public void SetEvents(IEnumerable<EventRow> rows) => Replace(Events, rows);
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> items)
     {

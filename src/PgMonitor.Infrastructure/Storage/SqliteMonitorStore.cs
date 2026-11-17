@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using PgMonitor.Core.Aggregation;
 using PgMonitor.Core.Incidents;
+using PgMonitor.Core.Locks;
 using PgMonitor.Core.Model;
 using PgMonitor.Core.Transactions;
 
@@ -16,7 +17,7 @@ namespace PgMonitor.Infrastructure.Storage;
 /// </summary>
 public sealed class SqliteMonitorStore : IMonitorStore
 {
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
 
     private readonly SqliteConnection _db;
     private readonly string _path;
@@ -187,6 +188,162 @@ public sealed class SqliteMonitorStore : IMonitorStore
                 """);
             Exec("PRAGMA user_version = 3");
             tx.Commit();
+            version = 3;
+        }
+
+        if (version == 3)
+        {
+            using var tx = _db.BeginTransaction();
+            Exec("""
+                CREATE TABLE lock_wait (
+                    id              INTEGER PRIMARY KEY,
+                    wait_key        TEXT    NOT NULL UNIQUE,
+                    pid             INTEGER NOT NULL,
+                    backend_start   INTEGER,
+                    query_start     INTEGER NOT NULL,
+                    db              TEXT,
+                    usr             TEXT,
+                    app             TEXT,
+                    client          TEXT,
+                    wait_event      TEXT,
+                    first_seen      INTEGER NOT NULL,
+                    last_seen       INTEGER NOT NULL,
+                    ended_at        INTEGER,
+                    end_reason      TEXT,
+                    blockers        TEXT,
+                    root_pid        INTEGER,
+                    root_db         TEXT,
+                    root_usr        TEXT,
+                    root_client     TEXT,
+                    root_state      TEXT,
+                    root_xact_start INTEGER,
+                    sql_hash        TEXT,
+                    root_sql_hash   TEXT
+                );
+                CREATE INDEX ix_lock_wait_seen ON lock_wait(first_seen);
+                """);
+            Exec("PRAGMA user_version = 4");
+            tx.Commit();
+        }
+    }
+
+    // ------------------------------------------------------------------ lock waits
+
+    public void RecordLockWaits(IReadOnlyList<LockWaitEvent> events)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        if (events.Count == 0)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            using var tx = _db.BeginTransaction();
+            using var sqlCmd = Cmd("INSERT OR IGNORE INTO sql_text (hash, text) VALUES ($h, $t)");
+            using var cmd = Cmd("""
+                INSERT INTO lock_wait (wait_key, pid, backend_start, query_start, db, usr, app, client, wait_event, first_seen, last_seen,
+                                       ended_at, end_reason, blockers, root_pid, root_db, root_usr, root_client, root_state, root_xact_start,
+                                       sql_hash, root_sql_hash)
+                VALUES ($k, $pid, $bs, $qs, $db, $u, $app, $cl, $we, $fs, $ls, $ea, $er, $b, $rp, $rdb, $ru, $rc, $rs, $rx, $h, $rh)
+                ON CONFLICT (wait_key) DO UPDATE SET
+                    last_seen = excluded.last_seen, ended_at = excluded.ended_at, end_reason = excluded.end_reason,
+                    blockers = COALESCE(excluded.blockers, lock_wait.blockers),
+                    root_pid = COALESCE(excluded.root_pid, lock_wait.root_pid), root_db = COALESCE(excluded.root_db, lock_wait.root_db),
+                    root_usr = COALESCE(excluded.root_usr, lock_wait.root_usr), root_client = COALESCE(excluded.root_client, lock_wait.root_client),
+                    root_state = COALESCE(excluded.root_state, lock_wait.root_state),
+                    root_xact_start = COALESCE(excluded.root_xact_start, lock_wait.root_xact_start),
+                    root_sql_hash = COALESCE(excluded.root_sql_hash, lock_wait.root_sql_hash)
+                """);
+            string? SaveSql(string? text)
+            {
+                if (string.IsNullOrEmpty(text))
+                {
+                    return null;
+                }
+                var hash = Hash(text);
+                sqlCmd.Parameters.Clear();
+                sqlCmd.Parameters.AddWithValue("$h", hash);
+                sqlCmd.Parameters.AddWithValue("$t", text);
+                sqlCmd.ExecuteNonQuery();
+                return hash;
+            }
+            foreach (var e in events)
+            {
+                var w = e.Waiter;
+                var r = e.Root;
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("$k", e.Key.Text);
+                cmd.Parameters.AddWithValue("$pid", w.Pid);
+                cmd.Parameters.AddWithValue("$bs", Db(Ms(w.BackendStart)));
+                cmd.Parameters.AddWithValue("$qs", Ms(e.Key.QueryStart));
+                cmd.Parameters.AddWithValue("$db", Db(w.Database));
+                cmd.Parameters.AddWithValue("$u", Db(w.UserName));
+                cmd.Parameters.AddWithValue("$app", Db(w.ApplicationName));
+                cmd.Parameters.AddWithValue("$cl", Db(w.ClientAddress));
+                cmd.Parameters.AddWithValue("$we", Db(w.WaitEvent is null ? null : $"{w.WaitEventType}:{w.WaitEvent}"));
+                cmd.Parameters.AddWithValue("$fs", Ms(e.FirstSeen));
+                cmd.Parameters.AddWithValue("$ls", Ms(e.LastSeen));
+                cmd.Parameters.AddWithValue("$ea", e.Kind == LockWaitEventKind.Ended ? Ms(e.At) : DBNull.Value);
+                cmd.Parameters.AddWithValue("$er", Db(e.EndReason));
+                cmd.Parameters.AddWithValue("$b", e.Blockers.Count == 0 ? DBNull.Value : string.Join(',', e.Blockers));
+                cmd.Parameters.AddWithValue("$rp", e.RootPid is { } rp ? rp : DBNull.Value);
+                cmd.Parameters.AddWithValue("$rdb", Db(r?.Database));
+                cmd.Parameters.AddWithValue("$ru", Db(r?.UserName));
+                cmd.Parameters.AddWithValue("$rc", Db(r?.ClientAddress));
+                cmd.Parameters.AddWithValue("$rs", Db(r?.State));
+                cmd.Parameters.AddWithValue("$rx", Db(Ms(r?.TransactionStart)));
+                cmd.Parameters.AddWithValue("$h", Db(SaveSql(w.Query)));
+                cmd.Parameters.AddWithValue("$rh", Db(SaveSql(r?.Query)));
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    public IReadOnlyList<StoredLockWait> ListLockWaits(int limit = 1000)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                SELECT w.pid, w.backend_start, w.query_start, w.db, w.usr, w.app, w.client, w.wait_event, w.first_seen, w.last_seen,
+                       w.ended_at, w.end_reason, w.blockers, w.root_pid, w.root_db, w.root_usr, w.root_client, w.root_state,
+                       w.root_xact_start, q.text, rq.text
+                FROM lock_wait w
+                LEFT JOIN sql_text q ON q.hash = w.sql_hash
+                LEFT JOIN sql_text rq ON rq.hash = w.root_sql_hash
+                ORDER BY w.first_seen DESC LIMIT $n
+                """);
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            var list = new List<StoredLockWait>();
+            while (r.Read())
+            {
+                list.Add(new StoredLockWait(
+                    r.GetInt32(0), OptMs(r, 1), FromMs(r.GetInt64(2)), OptStr(r, 3), OptStr(r, 4), OptStr(r, 5), OptStr(r, 6), OptStr(r, 7),
+                    FromMs(r.GetInt64(8)), FromMs(r.GetInt64(9)), OptMs(r, 10), OptStr(r, 11),
+                    r.IsDBNull(12) ? [] : r.GetString(12).Split(',').Select(p => int.Parse(p, CultureInfo.InvariantCulture)).ToList(),
+                    r.IsDBNull(13) ? null : r.GetInt32(13), OptStr(r, 14), OptStr(r, 15), OptStr(r, 16), OptStr(r, 17), OptMs(r, 18),
+                    OptStr(r, 19), OptStr(r, 20)));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>Most recent events of any kind (incident or not), newest first.</summary>
+    public IReadOnlyList<StoredEvent> ListRecentEvents(int limit = 50)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("SELECT incident_id, at, kind, severity, detail FROM event ORDER BY at DESC, id DESC LIMIT $n");
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            var list = new List<StoredEvent>();
+            while (r.Read())
+            {
+                list.Add(new StoredEvent(r.IsDBNull(0) ? null : r.GetInt64(0), FromMs(r.GetInt64(1)),
+                    Enum.Parse<IncidentEventKind>(r.GetString(2)), Enum.Parse<Severity>(r.GetString(3)), r.GetString(4)));
+            }
+            return list;
         }
     }
 
@@ -393,6 +550,11 @@ public sealed class SqliteMonitorStore : IMonitorStore
             {
                 lt.Parameters.AddWithValue("$r", "uygulama kapandı – sonu görülmedi");
                 lt.ExecuteNonQuery();
+            }
+            using (var lw = Cmd("UPDATE lock_wait SET ended_at = last_seen, end_reason = $r WHERE ended_at IS NULL"))
+            {
+                lw.Parameters.AddWithValue("$r", "uygulama kapandı – sonu görülmedi");
+                lw.ExecuteNonQuery();
             }
             using var cmd = Cmd("UPDATE incident SET status = $s, updated_at = $now WHERE status IN ('Active', 'Recovering')");
             cmd.Parameters.AddWithValue("$s", nameof(IncidentStatus.Interrupted));
@@ -745,6 +907,16 @@ public sealed class SqliteMonitorStore : IMonitorStore
                 cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
                 cmd.ExecuteNonQuery();
             }
+            using (var cmd = Cmd("DELETE FROM lock_wait WHERE ended_at IS NOT NULL AND ended_at < $c"))
+            {
+                cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
+                cmd.ExecuteNonQuery();
+            }
+            using (var cmd = Cmd("DELETE FROM event WHERE incident_id IS NULL AND at < $c"))
+            {
+                cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
+                cmd.ExecuteNonQuery();
+            }
             DeleteOrphanSql();
             Compact();
 
@@ -833,6 +1005,7 @@ public sealed class SqliteMonitorStore : IMonitorStore
             DELETE FROM sql_text
             WHERE NOT EXISTS (SELECT 1 FROM session s WHERE s.sql_hash = sql_text.hash)
               AND NOT EXISTS (SELECT 1 FROM long_tx l WHERE l.sql_hash = sql_text.hash)
+              AND NOT EXISTS (SELECT 1 FROM lock_wait w WHERE w.sql_hash = sql_text.hash OR w.root_sql_hash = sql_text.hash)
             """);
 
     /// <summary>Gives freed pages back to the OS and truncates the WAL.</summary>

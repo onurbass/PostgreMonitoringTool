@@ -15,7 +15,7 @@ public enum LongTxEventKind
 {
     /// <summary>The transaction crossed the threshold for the first time.</summary>
     Started,
-    /// <summary>Its state, wait or current statement changed (throttled).</summary>
+    /// <summary>Periodic update while it lasts (at most once per period): latest state, statement and last-seen time.</summary>
     Changed,
     /// <summary>It is no longer seen.</summary>
     Ended,
@@ -76,11 +76,9 @@ public sealed class LongTransactionTracker
                 continue;
             }
 
-            var changed = !string.Equals(entry.Row.State, row.State, StringComparison.Ordinal)
-                          || !string.Equals(entry.Row.WaitEvent, row.WaitEvent, StringComparison.Ordinal)
-                          || entry.Row.QueryStart != row.QueryStart;
             var updated = entry with { Row = row, LastSeen = t };
-            if (changed && t - entry.LastEmitted >= changeEvery)
+            // Periodic update (state, statement, last-seen time) so the stored record keeps up while it lasts.
+            if (t - entry.LastEmitted >= changeEvery)
             {
                 updated = updated with { LastEmitted = t };
                 events.Add(new LongTxEvent(LongTxEventKind.Changed, key, t, row, entry.FirstSeen, t, null));

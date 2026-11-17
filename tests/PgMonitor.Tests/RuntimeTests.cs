@@ -41,6 +41,9 @@ internal sealed class FlakyStore(IMonitorStore inner) : IMonitorStore
         }
     }
 
+    public void RecordLockWaits(IReadOnlyList<PgMonitor.Core.Locks.LockWaitEvent> events) { Check(); inner.RecordLockWaits(events); }
+    public IReadOnlyList<StoredLockWait> ListLockWaits(int limit = 1000) => inner.ListLockWaits(limit);
+    public IReadOnlyList<StoredEvent> ListRecentEvents(int limit = 50) => inner.ListRecentEvents(limit);
     public void RecordLongTransactions(IReadOnlyList<PgMonitor.Core.Transactions.LongTxEvent> events) { Check(); inner.RecordLongTransactions(events); }
     public IReadOnlyList<StoredLongTransaction> ListLongTransactions(int limit = 500) => inner.ListLongTransactions(limit);
     public bool EnqueueMail(OutboxMail mail) => inner.EnqueueMail(mail);
