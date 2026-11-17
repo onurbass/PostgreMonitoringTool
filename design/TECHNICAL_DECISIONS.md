@@ -110,7 +110,7 @@ rows but carry no lock evidence.
 
 ## D15 - Live connection details (2026-11-17)
 **Decision.**
-- One pooled Npgsql data source (max 2 connections) using `Options=-c default_transaction_read_only=on -c statement_timeout=3000`,
+- One pooled Npgsql data source (exactly 1 connection) using `Options=-c default_transaction_read_only=on -c statement_timeout=3000`,
   a 4 s client command timeout and the application name `PgMonitor (read-only)`, so the DB team can see and identify the
   monitor.
 - Every new connection runs `SHOW default_transaction_read_only`. Anything other than `on` refuses monitoring.
@@ -136,7 +136,7 @@ timings. These are checklist items C2-C5 in TEST_PLAN.md.
 - Mail text is Turkish plain text. Root blockers are labelled "şüpheli" (suspected). SQL is cut to `SqlMaxChars`.
   Demo mails start with `[SİMÜLASYON]` and are only written as `.eml` files.
 - MailKit 5 changed `SmtpClient.SendAsync` to take a `SendRequest` (checked against the package XML docs).
-- The monitor loop samples one at a time (no overlap). Intervals: 5 s healthy, 2 s during an incident, and exponential
+- The monitor loop samples one at a time (no overlap). Intervals: see D18 (default 10 s healthy, 5 s during an incident), and exponential
   backoff up to 60 s while failing.
 - A failure in storage or mail is logged by exception type only, and sampling continues.
 - Settings (`settings.json`) contain no password field. Demo is the default mode, and demo and live use different SQLite
@@ -158,6 +158,23 @@ timings. These are checklist items C2-C5 in TEST_PLAN.md.
 
 **Why.** The UI is a thin view over the tested pipeline. A separate Presentation project (D1) added nothing for one
 window.
+
+## D18 - Production safety limits (2026-11-17)
+**Decision.** The tool runs from a personal initiative against production, so its footprint stays minimal and predictable:
+- **Live sampling interval.** Default 10 s healthy and 5 s during an incident (was 5 s and 2 s). Configurable, with lower
+  limits of 5 s and 2 s. The incident interval cannot be faster than the normal one.
+- **Interval-dependent settings follow the interval.** The gap threshold is `max(30 s, 3 × interval)`, so slow sampling
+  is never mistaken for sleep. The pre-incident buffer covers about 3 minutes. Backoff reaches at least `2 × interval`.
+- **`pg_blocking_pids()` limit.** It is called for at most 50 Lock waiters per sample, the longest-waiting ones, ranked by
+  `row_number() OVER (... ORDER BY query_start)` inside the same query. A large pile-up therefore costs at most 50 short
+  lock-manager acquisitions per sample instead of one per waiter.
+- **Connections.** Exactly one connection (`MaxPoolSize = 1`).
+- **No retry on fatal errors.** After `AuthFailed` or `PermissionDenied` (including the read-only check failing), the
+  source stops contacting the server until the user saves settings again. Repeated failed logins would fill the server
+  log and could lock the account under a password policy.
+
+**Load.** At the defaults, healthy operation is 2 light statements every 10 s (~17 k/day). They read only shared memory;
+nothing touches user tables or takes heavyweight locks.
 
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**

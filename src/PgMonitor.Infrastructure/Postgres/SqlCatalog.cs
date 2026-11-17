@@ -33,31 +33,39 @@ public static class SqlCatalog
         """;
 
     /// <summary>
-    /// Run every sample: all client sessions except our own. pg_blocking_pids() is evaluated only for sessions
-    /// waiting on a heavyweight lock, because it briefly takes the lock manager's shared state (TECHNICAL_DECISIONS D3).
+    /// Run every sample: all client sessions except our own. pg_blocking_pids() briefly takes the lock manager's shared
+    /// state (TECHNICAL_DECISIONS D3), so it is evaluated only for sessions waiting on a heavyweight lock, and only for
+    /// the <see cref="MaxBlockingLookups"/> longest-waiting ones. Chains are built from the oldest waiters, so the root
+    /// blocker is still found; newer waiters beyond the limit simply have no blocker information.
     /// </summary>
     public const string Activity = """
-        SELECT a.pid,
-               a.backend_start,
-               a.datname,
-               a.usename,
-               a.application_name,
-               host(a.client_addr)                AS client_addr,
-               a.state,
-               a.wait_event_type,
-               a.wait_event,
-               a.xact_start,
-               a.query_start,
-               a.state_change,
-               a.backend_xid::text                AS backend_xid,
-               a.backend_xmin::text               AS backend_xmin,
-               left(a.query, 4000)                AS query,
-               CASE WHEN a.wait_event_type = 'Lock'
-                    THEN pg_blocking_pids(a.pid) END AS blocking_pids
-        FROM pg_stat_activity a
-        WHERE a.backend_type = 'client backend'
-          AND a.pid <> pg_backend_pid()
+        SELECT s.pid,
+               s.backend_start,
+               s.datname,
+               s.usename,
+               s.application_name,
+               host(s.client_addr)                AS client_addr,
+               s.state,
+               s.wait_event_type,
+               s.wait_event,
+               s.xact_start,
+               s.query_start,
+               s.state_change,
+               s.backend_xid::text                AS backend_xid,
+               s.backend_xmin::text               AS backend_xmin,
+               left(s.query, 4000)                AS query,
+               CASE WHEN s.lock_rank <= 50
+                    THEN pg_blocking_pids(s.pid) END AS blocking_pids
+        FROM (SELECT a.*,
+                     CASE WHEN a.wait_event_type = 'Lock'
+                          THEN row_number() OVER (PARTITION BY a.wait_event_type = 'Lock' ORDER BY a.query_start, a.pid) END AS lock_rank
+              FROM pg_stat_activity a
+              WHERE a.backend_type = 'client backend'
+                AND a.pid <> pg_backend_pid()) s
         """;
+
+    /// <summary>Upper limit of pg_blocking_pids() calls per sample (the number written into <see cref="Activity"/>).</summary>
+    public const int MaxBlockingLookups = 50;
 
     /// <summary>All statements, for the guard test and the connection-check screen.</summary>
     public static IReadOnlyDictionary<string, string> All { get; } = new Dictionary<string, string>(StringComparer.Ordinal)

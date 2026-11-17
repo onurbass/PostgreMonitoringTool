@@ -47,7 +47,7 @@ public sealed record PostgresConnectionSettings
                 $"-c default_transaction_read_only=on -c statement_timeout={StatementTimeoutMs}"),
             KeepAlive = 30,
             Pooling = true,
-            MaxPoolSize = 2,
+            MaxPoolSize = 1, // one connection to production, never more
             IncludeErrorDetail = false,
             PersistSecurityInfo = false,
         };

@@ -52,7 +52,7 @@ public sealed partial class MainViewModel : ObservableObject
             IsSimulated = settings.Mode == DataMode.Demo;
             ModeText = IsSimulated
                 ? $"DEMO – senaryo {settings.DemoScenario} (kurgusal veri, 10× hızlı)"
-                : $"CANLI – {settings.Postgres?.Describe()} (salt okunur)";
+                : $"CANLI – {settings.Postgres?.Describe()} (salt okunur) – {settings.Sampling.NormalIntervalSeconds} sn'de bir, olayda {settings.Sampling.IncidentIntervalSeconds} sn";
             _lastIncidentRefreshId = -1;
             Incidents.Refresh();
             PowerHelper.KeepAwake(settings.KeepAwakeOnAcPower);

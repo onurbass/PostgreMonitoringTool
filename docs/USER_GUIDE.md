@@ -35,10 +35,10 @@ DB ekibi session'ları sonlandırdıktan sonra da kayıtlı kanıtı inceleyebil
 
 ## 1. Kısaca nasıl çalışır
 
-- **Örnek alma:** Uygulama 5 saniyede bir `pg_stat_activity`'den session listesini okur. Olay sırasında bu aralık 2
-  saniyeye iner.
-- **Lock zinciri:** Lock bekleyen her session için PostgreSQL'e "seni kim blokluyor?" diye sorar (`pg_blocking_pids`).
-  Cevaplardan zinciri kurar.
+- **Örnek alma:** Uygulama varsayılan olarak 10 saniyede bir `pg_stat_activity`'den session listesini okur. Olay
+  sırasında bu aralık 5 saniyeye iner. İkisi de Ayarlar'dan değiştirilebilir (en az 5 sn ve 2 sn).
+- **Lock zinciri:** En uzun bekleyen en fazla 50 session için PostgreSQL'e "seni kim blokluyor?" diye sorar
+  (`pg_blocking_pids`). Zincir en eski bekleyenlerden kurulduğu için kök bloklayıcıyı bulmaya bu yeter.
 - **Olay açılması:** Bir sorgu **30 saniyeden uzun** lock bekliyorsa ve bu durum son 3 örneğin en az 2'sinde
   görülürse bir **olay** açılır. Tek bir anlık sıçrama olay açmaz.
 - **Kanıt kaydı:** Olay açılınca son ~3 dakikanın kaydı ("olay öncesi") diske yazılır. Olay boyunca her örnek kaydedilir.
@@ -367,10 +367,10 @@ Hepsi `%LOCALAPPDATA%\PgMonitor` klasöründedir. Sağ üstteki **Veri klasörü
 
 | Belirti | Olası neden ve çözüm |
 |---|---|
-| VERİ ALINAMIYOR – `Disconnected` | Sunucuya ulaşılamıyor: VPN, sunucu adı veya port yanlış. Uygulama bekleme süresini 60 sn'ye kadar uzatarak tekrar dener. |
+| VERİ ALINAMIYOR – `Disconnected` | Sunucuya ulaşılamıyor: VPN, sunucu adı veya port yanlış. Uygulama tekrar deneme aralığını giderek uzatır (en fazla 60 sn). |
 | VERİ ALINAMIYOR – `Timeout` | Ağ çok yavaş ya da sunucu cevap vermiyor. Ağır yük altındaki sunucuda da görülebilir; bu durum kayıtlıdır. |
-| VERİ ALINAMIYOR – `AuthFailed` | Şifre veya kullanıcı yanlış. Ayarlar'dan şifreyi yeniden kaydet. |
-| VERİ ALINAMIYOR – `PermissionDenied` | Hesabın bu sorgulara izni yok **ya da** sunucu salt okunur modu onaylamadı. Bağlantı testi hangisi olduğunu gösterir. |
+| VERİ ALINAMIYOR – `AuthFailed` | Şifre veya kullanıcı yanlış. Hesabın kilitlenmemesi için uygulama **tekrar denemez**. Şifreyi yeniden kaydet ve **Kaydet ve uygula**ya bas. |
+| VERİ ALINAMIYOR – `PermissionDenied` | Hesabın bu sorgulara izni yok **ya da** sunucu salt okunur modu onaylamadı. Uygulama tekrar denemez. Bağlantı testi hangisi olduğunu gösterir. |
 | KISMİ GÖRÜNÜRLÜK | Hesapta `pg_read_all_stats` yok. Bkz. [5. bölüm](#5-canlı-izlemeye-geçiş). |
 | Çok fazla olay açılıyor | Lock bekleme eşiğini yükselt (örn. 60 sn). |
 | Mail gitmiyor | Pano altındaki "Mail:" satırında son hatayı gör, **Test maili gönder** ile dene. Şirket SMTP'si kimlik doğrulama veya TLS istiyor olabilir. |
@@ -389,7 +389,7 @@ Loglar yalnızca olay türlerini ve hata tiplerini içerir. SQL, şifre ve sunuc
 | 2 | **Bağlantıyı test et** | Sürüm 15.x görünür, `Salt okunur: EVET` |
 | 3 | Görünürlük | "Tam" mı "KISMİ" mi, not al |
 | 4 | Sorgu süreleri | Birkaç yüz ms'nin altında |
-| 5 | DB ekibine sor: `pg_stat_activity`'de `PgMonitor (read-only)` görünüyor mu? | Görünür; en fazla 1–2 bağlantı |
+| 5 | DB ekibine sor: `pg_stat_activity`'de `PgMonitor (read-only)` görünüyor mu? | Görünür; her zaman tek bağlantı |
 | 6 | Bir gün normal çalıştır | Gereksiz olay yoksa eşikler uygun; varsa eşiği yükselt |
 | 7 | **Test maili gönder** | Alıcılara ulaşır |
 | 8 | VPN'i kısa süre kes, sonra bağla | Pano'da "VERİ ALINAMIYOR", sonra normale döner; sahte "düzeldi" yok |
@@ -402,8 +402,11 @@ bilgilerini paylaşmadan önce kontrol et.
 
 ## 15. Bilinen sınırlar
 
-- **Örnekleme aralığı:** 5 saniyede bir (olayda 2 sn) bakıldığı için birkaç saniyelik lock'lar görülmeyebilir. Bu
-  bilinçli bir tercihtir; o kadar kısa lock'lar sorun değildir.
+- **Örnekleme aralığı:** 10 saniyede bir (olayda 5 sn) bakıldığı için birkaç saniyelik lock'lar görülmeyebilir. Bu
+  bilinçli bir tercihtir; o kadar kısa lock'lar sorun değildir. 30 sn eşiğiyle bir olay, bekleme başladıktan yaklaşık
+  40–50 saniye sonra açılır.
+- **50 session sınırı:** 50'den fazla session aynı anda lock beklerse, en yeni bekleyenler için "kim blokluyor" bilgisi
+  alınmaz. Bu session'lar listede görünür ama "Bloklayan" sütunları boş kalır.
 - **Bekleme süresi bir üst sınırdır:** Sorgunun başladığı andan ölçülür. Sorgu lock'a sonradan takılmışsa gerçek
   bekleme biraz daha kısadır.
 - **Kök bloklayıcının SQL'i:** Session'ın son sorgusudur. Lock'u alan sorgu daha önce çalışmış olabilir.

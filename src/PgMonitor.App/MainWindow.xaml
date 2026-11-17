@@ -321,7 +321,17 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">
-                            <TextBlock Style="{StaticResource H2}" Margin="0,0,0,6" Text="Eşikler"/>
+                            <TextBlock Style="{StaticResource H2}" Margin="0,0,0,6" Text="Örnekleme (canlı mod)"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                <TextBlock Text="Normal aralık (sn, en az 5)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding NormalInterval}"/>
+                                <TextBlock Grid.Row="1" Text="Olay sırasında aralık (sn, en az 2)" VerticalAlignment="Center"/><TextBox Grid.Row="1" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding IncidentInterval}"/>
+                            </Grid>
+                            <TextBlock Foreground="{StaticResource Muted}" TextWrapping="Wrap"
+                                       Text="Her örnek 2 hafif okuma sorgusudur; tek bağlantı kullanılır. pg_blocking_pids yalnızca en uzun bekleyen 50 session için çağrılır. Hatalı şifre veya yetki hatasında tekrar denenmez."/>
+
+                            <TextBlock Style="{StaticResource H2}" Text="Eşikler"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>

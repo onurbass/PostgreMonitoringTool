@@ -52,7 +52,7 @@ free of packages and I/O, so the important logic is tested with plain unit tests
 ## 4. One monitoring cycle
 
 ```
-MonitorLoop (PeriodicTimer: 5 s healthy, 2 s during an incident; never overlapping)
+MonitorLoop (default 10 s healthy, 5 s during an incident, configurable; never overlapping)
   -> ISampleSource.CollectAsync()          Simulator (demo/tests) or PostgresSampleSource (live)
        returns ClusterSample, or a failed sample (Timeout | Disconnected | AuthFailed | PermissionDenied | Unknown)
   -> RingBuffer.Add(sample)                last ~3 min, in memory, bounded by count and by total query-text bytes

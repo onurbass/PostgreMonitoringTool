@@ -61,15 +61,17 @@ public sealed class MonitorService(AppPaths paths, LayeredCredentialStore creden
         }
 
         var step = demoInterval ?? TimeSpan.FromMilliseconds(500);
-        var options = new MonitorOptions
-        {
-            Incident = settings.Incident,
-            Storage = settings.Storage,
+        var options = demo
             // Demo runs faster than real time so an incident shows up within a minute; the engine uses sample time.
-            NormalInterval = demo ? step : TimeSpan.FromSeconds(5),
-            IncidentInterval = demo ? step : TimeSpan.FromSeconds(2),
-            MailCheckEvery = demo ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(15),
-        };
+            ? new MonitorOptions
+            {
+                Incident = settings.Incident,
+                Storage = settings.Storage,
+                NormalInterval = step,
+                IncidentInterval = step,
+                MailCheckEvery = TimeSpan.FromSeconds(2),
+            }
+            : settings.Sampling.ToOptions(settings);
 
         var loop = new MonitorLoop(holder.Source, store, options, notifier, outbox, time, loggers.CreateLogger<MonitorLoop>());
         loop.Updated += (_, s) => SnapshotReceived?.Invoke(this, s);

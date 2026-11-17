@@ -266,6 +266,55 @@ public sealed class RuntimeTests : IDisposable
     }
 
     [Fact]
+    public void Sampling_defaults_are_conservative_and_limits_are_enforced()
+    {
+        var s = new AppSettings();
+        Assert.Equal(10, s.Sampling.NormalIntervalSeconds);
+        Assert.Equal(5, s.Sampling.IncidentIntervalSeconds);
+        Assert.Empty(s.Validate());
+
+        Assert.NotEmpty((s with { Sampling = new SamplingSettings { NormalIntervalSeconds = 4 } }).Validate());
+        Assert.NotEmpty((s with { Sampling = new SamplingSettings { NormalIntervalSeconds = 10, IncidentIntervalSeconds = 1 } }).Validate());
+        Assert.NotEmpty((s with { Sampling = new SamplingSettings { NormalIntervalSeconds = 10, IncidentIntervalSeconds = 20 } }).Validate());
+        Assert.Empty((s with { Sampling = new SamplingSettings { NormalIntervalSeconds = 5, IncidentIntervalSeconds = 2 } }).Validate());
+    }
+
+    [Theory]
+    [InlineData(10, 5, 30, 36)]
+    [InlineData(30, 10, 90, 18)]
+    [InlineData(5, 2, 30, 90)]
+    public void Sampling_options_follow_the_interval(int normal, int incident, int expectedGapSeconds, int expectedPreSamples)
+    {
+        var app = new AppSettings { Sampling = new SamplingSettings { NormalIntervalSeconds = normal, IncidentIntervalSeconds = incident } };
+        var o = app.Sampling.ToOptions(app);
+        Assert.Equal(TimeSpan.FromSeconds(normal), o.NormalInterval);
+        Assert.Equal(TimeSpan.FromSeconds(incident), o.IncidentInterval);
+        Assert.Equal(TimeSpan.FromSeconds(expectedGapSeconds), o.Incident.MaxSampleGap); // no false "sleep" gaps
+        Assert.Equal(expectedPreSamples, o.Recorder.PreIncidentSamples);                 // ~3 minutes before the incident
+        Assert.True(o.MaxBackoff >= o.NormalInterval);
+    }
+
+    [Fact]
+    public async Task Ten_second_sampling_still_detects_and_closes_an_incident_without_false_gaps()
+    {
+        var app = new AppSettings();
+        var options = app.Sampling.ToOptions(app);
+        var scenario = Scenarios.S05LockChain with { Step = TimeSpan.FromSeconds(10) };
+        using var store = new SqliteMonitorStore(Path.Combine(_dir, "ten.db"));
+        var source = new SimulatedSampleSource(scenario);
+        var loop = new MonitorLoop(source, store, options, null, null, new ManualTime(scenario.Start), new ListLogger<MonitorLoop>());
+        var events = new List<IncidentEvent>();
+        loop.Updated += (_, s) => events.AddRange(s.RecentEvents.Where(e => e.At == s.Sample!.SampledAt));
+        await RunToEnd(loop, source);
+
+        Assert.Single(events, e => e.Kind == IncidentEventKind.Opened);
+        Assert.Single(events, e => e.Kind == IncidentEventKind.Closed);
+        Assert.DoesNotContain(events, e => e.Kind == IncidentEventKind.GapStarted);
+        var detail = store.GetIncident(1)!;
+        Assert.Contains(detail.Samples, x => x.Phase == SamplePhase.Pre);
+    }
+
+    [Fact]
     public void Demo_and_live_use_separate_database_files()
     {
         var p = new AppPaths(_dir);

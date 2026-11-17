@@ -55,9 +55,85 @@ public partial class PostgresTests
     }
 
     [Fact]
-    public void Blocking_pids_is_only_evaluated_for_lock_waiters()
+    public void Blocking_pids_is_only_evaluated_for_the_oldest_lock_waiters()
     {
-        Assert.Matches(@"CASE\s+WHEN\s+a\.wait_event_type\s*=\s*'Lock'\s+THEN\s+pg_blocking_pids\(a\.pid\)", SqlCatalog.Activity);
+        var sql = SqlCatalog.Activity;
+        // Rank exists only for Lock waiters, ordered by how long they have waited ...
+        Assert.Matches(@"CASE\s+WHEN\s+a\.wait_event_type\s*=\s*'Lock'\s+THEN\s+row_number\(\)\s+OVER\s+\(PARTITION BY a\.wait_event_type = 'Lock' ORDER BY a\.query_start, a\.pid\)", sql);
+        // ... and pg_blocking_pids is called only for rank <= the limit (NULL rank = not a Lock waiter = no call).
+        Assert.Matches($@"CASE\s+WHEN\s+s\.lock_rank\s*<=\s*{SqlCatalog.MaxBlockingLookups}\s+THEN\s+pg_blocking_pids\(s\.pid\)", sql);
+        Assert.Single(Regex.Matches(sql, "pg_blocking_pids"));
+        Assert.Equal(50, SqlCatalog.MaxBlockingLookups);
+    }
+
+    [Fact]
+    public void Live_connection_uses_a_single_pooled_connection()
+    {
+        var b = new NpgsqlConnectionStringBuilder(Settings.BuildConnectionString(Canary));
+        Assert.Equal(1, b.MaxPoolSize);
+    }
+
+    [Theory]
+    [InlineData(CollectFailureKind.AuthFailed, true)]
+    [InlineData(CollectFailureKind.PermissionDenied, true)]
+    [InlineData(CollectFailureKind.Timeout, false)]
+    [InlineData(CollectFailureKind.Disconnected, false)]
+    [InlineData(CollectFailureKind.Unknown, false)]
+    public void Only_password_and_permission_errors_stop_retrying(CollectFailureKind kind, bool fatal)
+    {
+        Assert.Equal(fatal, PostgresSampleSource.IsFatal(kind));
+    }
+
+    [Fact]
+    public async Task Halted_source_never_contacts_the_server_until_reset()
+    {
+        // A listener that counts connection attempts: after a halt there must be none.
+        var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        var attempts = 0;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var accept = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                using var client = await listener.AcceptTcpClientAsync(stop.Token);
+                Interlocked.Increment(ref attempts);
+            }
+        }, TestContext.Current.CancellationToken);
+        try
+        {
+            var settings = new PostgresConnectionSettings { Host = "127.0.0.1", Port = port, Username = "svc_monitor", ConnectTimeoutSeconds = 2 };
+            await using var source = new PostgresSampleSource(settings, _ => ValueTask.FromResult<string?>(Canary));
+            source.Halt(CollectFailureKind.AuthFailed, "PostgreSQL error SQLSTATE 28P01");
+
+            for (var i = 0; i < 5; i++)
+            {
+                var sample = await source.CollectAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(CollectFailureKind.AuthFailed, sample.Failure);
+            }
+            await Task.Delay(200, TestContext.Current.CancellationToken);
+            Assert.Equal(0, Volatile.Read(ref attempts));
+            Assert.Contains("tekrar bağlanılmıyor", source.LastError, StringComparison.Ordinal);
+
+            await source.ResetCredentialsAsync();
+            Assert.Null(source.HaltedBecause);
+            await source.CollectAsync(TestContext.Current.CancellationToken); // now it does try (and fails: not a real server)
+            Assert.True(Volatile.Read(ref attempts) >= 1);
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            listener.Stop();
+            try
+            {
+                await accept;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException or ObjectDisposedException)
+            {
+                // expected when the listener stops
+            }
+        }
     }
 
     [GeneratedRegex(@"^\s*\w+")]

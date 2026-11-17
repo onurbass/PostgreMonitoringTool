@@ -42,6 +42,10 @@ public sealed class PostgresSampleSource : ISampleSource, IAsyncDisposable
 
     public async Task<ClusterSample> CollectAsync(CancellationToken cancellationToken)
     {
+        if (HaltedBecause is { } halted)
+        {
+            return ClusterSample.Failed(_time.GetUtcNow(), halted);
+        }
         try
         {
             var connection = await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
@@ -89,8 +93,28 @@ public sealed class PostgresSampleSource : ISampleSource, IAsyncDisposable
             var (kind, description) = PgErrorMapper.Map(ex);
             LastError = description;
             await ResetConnectionAsync().ConfigureAwait(false);
+            if (IsFatal(kind))
+            {
+                Halt(kind, description);
+            }
             return ClusterSample.Failed(_time.GetUtcNow(), kind);
         }
+    }
+
+    /// <summary>
+    /// Wrong password or missing permission will not fix itself. Retrying would only fill the server log with failed
+    /// logins and could lock the account under a password policy, so the source stops contacting the server until
+    /// <see cref="ResetCredentialsAsync"/> (the user saves settings or a new password).
+    /// </summary>
+    public static bool IsFatal(CollectFailureKind kind) => kind is CollectFailureKind.AuthFailed or CollectFailureKind.PermissionDenied;
+
+    /// <summary>Set after a fatal failure; while set, nothing is sent to the server.</summary>
+    public CollectFailureKind? HaltedBecause { get; private set; }
+
+    internal void Halt(CollectFailureKind kind, string description)
+    {
+        HaltedBecause = kind;
+        LastError = $"{description} – sunucuya tekrar bağlanılmıyor; ayarları/şifreyi düzeltip 'Kaydet ve uygula'ya basın";
     }
 
     /// <summary>Opens a connection if needed, then proves it is read-only and reads capabilities.</summary>
@@ -159,6 +183,7 @@ public sealed class PostgresSampleSource : ISampleSource, IAsyncDisposable
     /// <summary>Forget the cached password/data source (after the user changes credentials).</summary>
     public async Task ResetCredentialsAsync()
     {
+        HaltedBecause = null;
         await ResetConnectionAsync().ConfigureAwait(false);
         if (_dataSource is not null)
         {

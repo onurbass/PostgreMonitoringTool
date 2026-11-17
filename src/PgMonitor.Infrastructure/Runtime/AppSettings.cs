@@ -37,9 +37,20 @@ public sealed record AppSettings
     /// <summary>Scenario id played in demo mode.</summary>
     public string DemoScenario { get; init; } = "S05";
 
+    /// <summary>How often the live database is sampled. Conservative defaults for a production cluster.</summary>
+    public SamplingSettings Sampling { get; init; } = new();
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
+        if (Sampling.NormalIntervalSeconds is < SamplingSettings.MinNormal or > SamplingSettings.MaxInterval)
+        {
+            errors.Add($"Normal örnekleme aralığı {SamplingSettings.MinNormal}-{SamplingSettings.MaxInterval} sn arasında olmalı.");
+        }
+        if (Sampling.IncidentIntervalSeconds < SamplingSettings.MinIncident || Sampling.IncidentIntervalSeconds > Sampling.NormalIntervalSeconds)
+        {
+            errors.Add($"Olay sırasındaki aralık en az {SamplingSettings.MinIncident} sn olmalı ve normal aralıktan uzun olmamalı.");
+        }
         if (Mode == DataMode.Live)
         {
             if (Postgres is null || string.IsNullOrWhiteSpace(Postgres.Host))
@@ -86,6 +97,42 @@ public sealed record AppSettings
     }
 
     private static bool IsAddress(string? s) => !string.IsNullOrWhiteSpace(s) && MailAddress.TryCreate(s, out _);
+}
+
+/// <summary>
+/// Live sampling intervals. Defaults (10 s healthy, 5 s during an incident) favour a light footprint on production;
+/// lower limits keep the user from making the tool aggressive by accident.
+/// </summary>
+public sealed record SamplingSettings
+{
+    public const int MinNormal = 5;
+    public const int MinIncident = 2;
+    public const int MaxInterval = 300;
+
+    public int NormalIntervalSeconds { get; init; } = 10;
+    public int IncidentIntervalSeconds { get; init; } = 5;
+
+    /// <summary>
+    /// Builds the loop options for live mode. Settings that depend on the interval follow it, so a slower interval
+    /// does not cause false sleep gaps or a pre-incident buffer that covers far more than ~3 minutes.
+    /// </summary>
+    public MonitorOptions ToOptions(AppSettings app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        var normal = TimeSpan.FromSeconds(Math.Clamp(NormalIntervalSeconds, MinNormal, MaxInterval));
+        var incident = TimeSpan.FromSeconds(Math.Clamp(IncidentIntervalSeconds, MinIncident, (int)normal.TotalSeconds));
+        var gap = TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(30).Ticks, normal.Ticks * 3));
+        var preSamples = (int)Math.Ceiling(TimeSpan.FromMinutes(3) / incident);
+        return new MonitorOptions
+        {
+            Incident = app.Incident with { MaxSampleGap = gap },
+            Storage = app.Storage,
+            Recorder = new RecorderSettings { PreIncidentSamples = Math.Max(10, preSamples) },
+            NormalInterval = normal,
+            IncidentInterval = incident,
+            MaxBackoff = TimeSpan.FromSeconds(Math.Max(60, normal.TotalSeconds * 2)),
+        };
+    }
 }
 
 /// <summary>File locations under %LOCALAPPDATA%\PgMonitor (or a given root for tests).</summary>

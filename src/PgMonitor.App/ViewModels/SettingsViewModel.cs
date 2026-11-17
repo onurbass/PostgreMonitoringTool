@@ -36,6 +36,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _sendOnEscalation = true;
     [ObservableProperty] private string _smtpPasswordState = "";
 
+    [ObservableProperty] private string _normalInterval = "10";
+    [ObservableProperty] private string _incidentInterval = "5";
     [ObservableProperty] private string _lockWaitSeconds = "30";
     [ObservableProperty] private string _highWaiters = "5";
     [ObservableProperty] private string _criticalWaiters = "20";
@@ -83,6 +85,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         MailTo = string.Join("; ", e.To);
         SqlMaxChars = e.SqlMaxChars.ToString(CultureInfo.InvariantCulture);
         SendOnEscalation = e.SendOnEscalation;
+        NormalInterval = s.Sampling.NormalIntervalSeconds.ToString(CultureInfo.InvariantCulture);
+        IncidentInterval = s.Sampling.IncidentIntervalSeconds.ToString(CultureInfo.InvariantCulture);
         LockWaitSeconds = ((int)s.Incident.LockWaitThreshold.TotalSeconds).ToString(CultureInfo.InvariantCulture);
         HighWaiters = s.Incident.HighWaiterCount.ToString(CultureInfo.InvariantCulture);
         CriticalWaiters = s.Incident.CriticalWaiterCount.ToString(CultureInfo.InvariantCulture);
@@ -165,6 +169,11 @@ public sealed partial class SettingsViewModel : ObservableObject
             },
             DatabaseApps = apps,
             KeepAwakeOnAcPower = KeepAwake,
+            Sampling = new SamplingSettings
+            {
+                NormalIntervalSeconds = Int(NormalInterval, 10),
+                IncidentIntervalSeconds = Int(IncidentInterval, 5),
+            },
         };
     }
 
