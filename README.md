@@ -11,14 +11,25 @@ second phase.
 
 > Status: under development. A user guide (Turkish) will be added in `docs/USER_GUIDE.md`.
 
-## Build
+## Build and run
 
 Requires the .NET 10 SDK.
 
 ```
 dotnet build PgMonitor.slnx
 dotnet test --solution PgMonitor.slnx
+dotnet run --project src/PgMonitor.App
 ```
+
+The app starts in **demo mode**, using fictional data with no network connection. Switch to live monitoring in
+*Ayarlar*.
+
+Data, logs and settings live in `%LOCALAPPDATA%\PgMonitor`. Command-line options:
+
+| Option | Effect |
+|---|---|
+| `--data <folder>` | Use another data folder |
+| `--snapshot <folder> --seconds N` | Run the demo off-screen and save one PNG per tab |
 
 ## Documents
 

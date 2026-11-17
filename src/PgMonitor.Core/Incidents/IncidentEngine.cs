@@ -27,7 +27,7 @@ public static class IncidentEngine
         {
             if (!state.InGap)
             {
-                events.Add(new(IncidentEventKind.GapStarted, openId, t, openSeverity, $"Sampling failed: {sample.Failure}"));
+                events.Add(new(IncidentEventKind.GapStarted, openId, t, openSeverity, $"Veri alınamadı: {sample.Failure}"));
                 state = state with { InGap = true, ClearSince = null };
             }
             return new(state, events, null);
@@ -37,15 +37,15 @@ public static class IncidentEngine
         var gapEnded = false;
         if (state.InGap)
         {
-            events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Sampling resumed"));
+            events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Veri alımı yeniden başladı"));
             state = state with { InGap = false };
             gapEnded = true;
         }
         else if (state.LastSuccessAt is { } last && t - last > settings.MaxSampleGap)
         {
             var gap = t - last;
-            events.Add(new(IncidentEventKind.GapStarted, openId, last, openSeverity, $"No samples for {Format(gap)} (sleep or network loss)"));
-            events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Sampling resumed"));
+            events.Add(new(IncidentEventKind.GapStarted, openId, last, openSeverity, $"{Format(gap)} boyunca örnek yok (uyku veya ağ kesintisi)"));
+            events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Veri alımı yeniden başladı"));
             gapEnded = true;
         }
         if (gapEnded)
@@ -61,7 +61,7 @@ public static class IncidentEngine
             (oldServer.PostmasterStart != newServer.PostmasterStart ||
              !string.Equals(oldServer.ServerAddress, newServer.ServerAddress, StringComparison.Ordinal)))
         {
-            events.Add(new(IncidentEventKind.ServerChanged, openId, t, openSeverity, "PostgreSQL restarted or the connection moved to another node"));
+            events.Add(new(IncidentEventKind.ServerChanged, openId, t, openSeverity, "PostgreSQL yeniden başladı veya bağlantı başka bir node'a geçti"));
         }
 
         state = state with { LastSuccessAt = t, Server = sample.Server ?? state.Server };
@@ -101,7 +101,7 @@ public static class IncidentEngine
                     state = state with { ClearSince = clearSince };
                     if (t - clearSince >= settings.RecoveryClear)
                     {
-                        events.Add(Event(IncidentEventKind.RecoveryStarted, state, t, $"No lock waits for {Format(t - clearSince)}"));
+                        events.Add(Event(IncidentEventKind.RecoveryStarted, state, t, $"{Format(t - clearSince)} boyunca eşiği aşan lock beklemesi yok"));
                         state = state with { Phase = IncidentPhase.Recovering, RecoveringSince = t };
                     }
                 }
@@ -116,7 +116,7 @@ public static class IncidentEngine
                 else if (state.RecoveringSince is { } since && t - since >= settings.PostRecovery)
                 {
                     var closed = state.Incident! with { ClosedAt = t };
-                    events.Add(new(IncidentEventKind.Closed, closed.Id, t, closed.Severity, $"Incident lasted {Format(t - closed.OpenedAt)}"));
+                    events.Add(new(IncidentEventKind.Closed, closed.Id, t, closed.Severity, $"Olay süresi {Format(t - closed.OpenedAt)}"));
                     state = state with { Phase = IncidentPhase.Healthy, Incident = closed, RecoveringSince = null, ClearSince = null };
                 }
                 break;
@@ -200,7 +200,7 @@ public static class IncidentEngine
         foreach (var db in eval.AffectedDatabases.Where(d => !incident.Databases.Contains(d)))
         {
             incident = incident with { Databases = incident.Databases.Add(db) };
-            events.Add(new(IncidentEventKind.DatabaseAffected, incident.Id, t, incident.Severity, $"Lock waits now also in database '{db}'"));
+            events.Add(new(IncidentEventKind.DatabaseAffected, incident.Id, t, incident.Severity, $"Lock beklemeleri artık '{db}' veritabanında da var"));
         }
         if (eval.Severity > incident.Severity)
         {
@@ -217,8 +217,8 @@ public static class IncidentEngine
 
     private static string Describe(LockEvaluation e) =>
         string.Create(CultureInfo.InvariantCulture,
-            $"{e.Analysis.WaiterCount} session(s) waiting on locks, {e.QualifyingWaiters} over threshold, longest {Format(e.Analysis.LongestWait)}, " +
-            $"{e.Analysis.RootBlockers.Count} root blocker(s), databases: {string.Join(", ", e.Analysis.AffectedDatabases)}");
+            $"{e.Analysis.WaiterCount} session lock bekliyor (eşiği aşan {e.QualifyingWaiters}), en uzun {Format(e.Analysis.LongestWait)}, " +
+            $"{e.Analysis.RootBlockers.Count} kök bloklayıcı, veritabanları: {string.Join(", ", e.AffectedDatabases)}");
 
     public static string Format(TimeSpan span) =>
         span.TotalHours >= 1

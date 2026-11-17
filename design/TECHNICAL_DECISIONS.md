@@ -144,6 +144,21 @@ timings. These are checklist items C2-C5 in TEST_PLAN.md.
 
 **Why.** A broken SMTP server or a full disk must never stop evidence collection. The dedupe key makes re-processing safe.
 
+## D17 - WPF app (2026-11-17)
+**Decision.**
+- A single window with three tabs: Pano (live), Olaylar (history from SQLite), Ayarlar.
+- View models live in the App project, using CommunityToolkit.Mvvm.
+- Closing the window hides it to the tray and monitoring continues. "Çıkış" in the tray menu stops monitoring.
+- Only one instance runs (named mutex).
+- Demo mode samples every 0.5 s, about 10× real time, so an incident appears within a minute. The engine uses sample
+  time, so this changes nothing in the logic.
+- Passwords go from the `PasswordBox` straight to the credential store and are never held in a view model.
+- `--snapshot <dir>` renders each tab off-screen to PNG. This is a self-check without screen capture.
+- `--data <dir>` uses another data folder, so the self-checks do not touch the user's data.
+
+**Why.** The UI is a thin view over the tested pipeline. A separate Presentation project (D1) added nothing for one
+window.
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.
