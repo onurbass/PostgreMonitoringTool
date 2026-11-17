@@ -146,7 +146,8 @@ terminated or finished, not verifiable"), and what is **Suspected**.
 | File location | `%LOCALAPPDATA%\PgMonitor\monitor.db`; the demo/simulator uses `monitor-demo.db` |
 | Mode | WAL, one writer task |
 | Healthy | 1 aggregate row per 60 s (counts per signal, sessions per DB, max transaction age, SLRU rates) |
-| Incident | Incident row, events, and per-sample session rows; SQL text de-duplicated by hash in its own table |
+| Incident | Incident row, events, and per-sample session rows; SQL text de-duplicated by hash in its own table. Plain `idle` sessions (no transaction) are not stored: they hold no locks. Redacted rows are only counted |
+| Restart | Incidents left Active/Recovering by a previous run become `Interrupted`; new incident ids continue after the stored maximum |
 | Retention | Aggregates 30 days, closed incidents 180 days; deleted in batches |
 | Size | Soft cap (default 1 GB) on `db + wal` size. Over the cap, delete the oldest **closed** incidents first. Never delete open incidents; if they alone exceed the cap, show a warning and thin out the stored samples (keep every 5th) |
 

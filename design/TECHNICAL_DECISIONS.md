@@ -96,6 +96,18 @@ statement started, which is an upper bound of the lock wait. PG15 has no per-loc
 `pg_locks.waitstart` column (PG14+) gives the exact time, but it requires a join on `pg_locks`, so it is deferred.
 **Source.** https://www.postgresql.org/docs/15/view-pg-locks.html
 
+## D14 - SQLite layout (2026-11-17)
+**Decision.**
+- Tables: `aggregate`, `incident`, `event`, `sample`, `session`, `sql_text`.
+- Times are stored as Unix milliseconds (UTC). Enums are stored by name, so the file is readable in any SQLite browser.
+- `PRAGMA auto_vacuum = INCREMENTAL` is set at creation, so retention deletes give space back. After deletes we run
+  `incremental_vacuum` + `wal_checkpoint(TRUNCATE)`.
+- Only sessions with a transaction or a non-idle state are stored per sample.
+
+**Why.** Space comes back without a full `VACUUM`, and the files are easy to inspect by hand. Idle sessions are most of the
+rows but carry no lock evidence.
+**Source.** https://www.sqlite.org/pragma.html#pragma_auto_vacuum
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.
