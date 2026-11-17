@@ -9,7 +9,10 @@ second phase.
 - **No database actions:** it never terminates sessions, cancels queries or changes settings.
 - **Credentials:** passwords live only in Windows Credential Manager.
 
-> Status: under development. A user guide (Turkish) will be added in `docs/USER_GUIDE.md`.
+> **User guide (Turkish): [docs/USER_GUIDE.md](docs/USER_GUIDE.md)**
+>
+> Status: lock monitoring is complete and tested on simulated data, but not yet verified against the real cluster.
+> Subtrans monitoring is the next phase.
 
 ## Build and run
 
