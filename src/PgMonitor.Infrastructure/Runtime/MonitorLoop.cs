@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using PgMonitor.Core.Incidents;
 using PgMonitor.Core.Model;
+using PgMonitor.Core.Transactions;
 using PgMonitor.Infrastructure.Notifications;
 using PgMonitor.Infrastructure.Postgres;
 using PgMonitor.Infrastructure.Storage;
@@ -36,6 +37,9 @@ public sealed record MonitorSnapshot
     public OutboxCounts? Mail { get; init; }
     public string? MailError { get; init; }
     public ServerCapabilities? Capabilities { get; init; }
+
+    /// <summary>Transactions currently open longer than the threshold (whether or not they block anyone).</summary>
+    public IReadOnlyList<LongTransaction> LongTransactions { get; init; } = [];
 }
 
 /// <summary>
@@ -55,6 +59,7 @@ public sealed partial class MonitorLoop
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
     private readonly EvidenceRecorder _recorder;
+    private readonly LongTransactionTracker _longTx = new();
     private readonly List<IncidentEvent> _recent = [];
 
     private EngineState _state = EngineState.Initial;
@@ -120,9 +125,11 @@ public sealed partial class MonitorLoop
         }
 
         string? storageError = null;
+        var longTxEvents = _longTx.Update(sample, _options.Incident.LongTransactionThreshold, TimeSpan.FromMinutes(1));
         try
         {
             _recorder.Handle(sample, result);
+            _store.RecordLongTransactions(longTxEvents);
         }
 #pragma warning disable CA1031 // Storage problems must not stop sampling; they are shown in the UI.
         catch (Exception ex)
@@ -194,6 +201,7 @@ public sealed partial class MonitorLoop
             Mail = mail,
             MailError = _outbox?.LastError,
             Capabilities = (_source as PostgresSampleSource)?.Capabilities,
+            LongTransactions = _longTx.Current,
         };
         Updated?.Invoke(this, Latest);
         return Latest;

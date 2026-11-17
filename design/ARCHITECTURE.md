@@ -107,7 +107,7 @@ mark another database as affected):
 | Warning | any lock wait ≥ 30 s |
 | High | ≥ 5 lock waiters, or any lock wait ≥ 2 min |
 | Critical | ≥ 20 lock waiters, or lock waiters in ≥ 2 databases |
-| Long transaction | any transaction older than 10 min | no, advisory (shown, aggregated, used for suspects) |
+| Long transaction | any transaction older than 10 min (configurable), blocking or not | no, advisory: listed live, one SQLite record per transaction (first seen, last seen, how it ended), no mail (D19) |
 | SLRU pressure | `Subtrans` `blks_read`/s far above the 1-hour median | no in v1 (supporting evidence only, until we see real baselines) |
 | Multi-database | waiters in `≥ 2` databases | raises severity |
 

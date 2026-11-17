@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using PgMonitor.Core.Aggregation;
 using PgMonitor.Core.Incidents;
 using PgMonitor.Core.Model;
+using PgMonitor.Core.Transactions;
 
 namespace PgMonitor.Infrastructure.Storage;
 
@@ -15,7 +16,7 @@ namespace PgMonitor.Infrastructure.Storage;
 /// </summary>
 public sealed class SqliteMonitorStore : IMonitorStore
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private readonly SqliteConnection _db;
     private readonly string _path;
@@ -154,6 +155,122 @@ public sealed class SqliteMonitorStore : IMonitorStore
                 """);
             Exec("PRAGMA user_version = 2");
             tx.Commit();
+            version = 2;
+        }
+
+        if (version == 2)
+        {
+            using var tx = _db.BeginTransaction();
+            Exec("""
+                CREATE TABLE long_tx (
+                    id            INTEGER PRIMARY KEY,
+                    tx_key        TEXT    NOT NULL UNIQUE,
+                    pid           INTEGER NOT NULL,
+                    backend_start INTEGER,
+                    xact_start    INTEGER NOT NULL,
+                    db            TEXT,
+                    usr           TEXT,
+                    app           TEXT,
+                    client        TEXT,
+                    first_seen    INTEGER NOT NULL,
+                    last_seen     INTEGER NOT NULL,
+                    ended_at      INTEGER,
+                    end_reason    TEXT,
+                    state         TEXT,
+                    wait_type     TEXT,
+                    wait_event    TEXT,
+                    query_start   INTEGER,
+                    state_change  INTEGER,
+                    sql_hash      TEXT
+                );
+                CREATE INDEX ix_long_tx_seen ON long_tx(first_seen);
+                """);
+            Exec("PRAGMA user_version = 3");
+            tx.Commit();
+        }
+    }
+
+    // ------------------------------------------------------------------ long transactions
+
+    public void RecordLongTransactions(IReadOnlyList<LongTxEvent> events)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        if (events.Count == 0)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            using var tx = _db.BeginTransaction();
+            using var sqlCmd = Cmd("INSERT OR IGNORE INTO sql_text (hash, text) VALUES ($h, $t)");
+            using var cmd = Cmd("""
+                INSERT INTO long_tx (tx_key, pid, backend_start, xact_start, db, usr, app, client, first_seen, last_seen,
+                                     ended_at, end_reason, state, wait_type, wait_event, query_start, state_change, sql_hash)
+                VALUES ($k, $pid, $bs, $xs, $db, $u, $app, $cl, $fs, $ls, $ea, $er, $st, $wt, $we, $qs, $sc, $h)
+                ON CONFLICT (tx_key) DO UPDATE SET
+                    last_seen = excluded.last_seen, ended_at = excluded.ended_at, end_reason = excluded.end_reason,
+                    state = excluded.state, wait_type = excluded.wait_type, wait_event = excluded.wait_event,
+                    query_start = excluded.query_start, state_change = excluded.state_change, sql_hash = excluded.sql_hash
+                """);
+            foreach (var e in events)
+            {
+                var r = e.Session;
+                string? hash = null;
+                if (!string.IsNullOrEmpty(r.Query))
+                {
+                    hash = Hash(r.Query);
+                    sqlCmd.Parameters.Clear();
+                    sqlCmd.Parameters.AddWithValue("$h", hash);
+                    sqlCmd.Parameters.AddWithValue("$t", r.Query);
+                    sqlCmd.ExecuteNonQuery();
+                }
+                var ended = e.Kind == LongTxEventKind.Ended;
+                cmd.Parameters.Clear();
+                cmd.Parameters.AddWithValue("$k", e.Key.Text);
+                cmd.Parameters.AddWithValue("$pid", r.Pid);
+                cmd.Parameters.AddWithValue("$bs", Db(Ms(r.BackendStart)));
+                cmd.Parameters.AddWithValue("$xs", Ms(e.Key.TransactionStart));
+                cmd.Parameters.AddWithValue("$db", Db(r.Database));
+                cmd.Parameters.AddWithValue("$u", Db(r.UserName));
+                cmd.Parameters.AddWithValue("$app", Db(r.ApplicationName));
+                cmd.Parameters.AddWithValue("$cl", Db(r.ClientAddress));
+                cmd.Parameters.AddWithValue("$fs", Ms(e.FirstSeen));
+                cmd.Parameters.AddWithValue("$ls", Ms(e.LastSeen));
+                cmd.Parameters.AddWithValue("$ea", ended ? Ms(e.At) : DBNull.Value);
+                cmd.Parameters.AddWithValue("$er", Db(e.EndReason));
+                cmd.Parameters.AddWithValue("$st", Db(r.State));
+                cmd.Parameters.AddWithValue("$wt", Db(r.WaitEventType));
+                cmd.Parameters.AddWithValue("$we", Db(r.WaitEvent));
+                cmd.Parameters.AddWithValue("$qs", Db(Ms(r.QueryStart)));
+                cmd.Parameters.AddWithValue("$sc", Db(Ms(r.StateChange)));
+                cmd.Parameters.AddWithValue("$h", Db(hash));
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    public IReadOnlyList<StoredLongTransaction> ListLongTransactions(int limit = 500)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                SELECT l.pid, l.backend_start, l.xact_start, l.db, l.usr, l.app, l.client, l.first_seen, l.last_seen,
+                       l.ended_at, l.end_reason, l.state, l.wait_type, l.wait_event, l.query_start, l.state_change, q.text
+                FROM long_tx l LEFT JOIN sql_text q ON q.hash = l.sql_hash
+                ORDER BY l.first_seen DESC LIMIT $n
+                """);
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            var list = new List<StoredLongTransaction>();
+            while (r.Read())
+            {
+                list.Add(new StoredLongTransaction(
+                    r.GetInt32(0), OptMs(r, 1), FromMs(r.GetInt64(2)), OptStr(r, 3), OptStr(r, 4), OptStr(r, 5), OptStr(r, 6),
+                    FromMs(r.GetInt64(7)), FromMs(r.GetInt64(8)), OptMs(r, 9), OptStr(r, 10), OptStr(r, 11), OptStr(r, 12),
+                    OptStr(r, 13), OptMs(r, 14), OptMs(r, 15), OptStr(r, 16)));
+            }
+            return list;
         }
     }
 
@@ -272,6 +389,11 @@ public sealed class SqliteMonitorStore : IMonitorStore
     {
         lock (_gate)
         {
+            using (var lt = Cmd("UPDATE long_tx SET ended_at = last_seen, end_reason = $r WHERE ended_at IS NULL"))
+            {
+                lt.Parameters.AddWithValue("$r", "uygulama kapandı – sonu görülmedi");
+                lt.ExecuteNonQuery();
+            }
             using var cmd = Cmd("UPDATE incident SET status = $s, updated_at = $now WHERE status IN ('Active', 'Recovering')");
             cmd.Parameters.AddWithValue("$s", nameof(IncidentStatus.Interrupted));
             cmd.Parameters.AddWithValue("$now", Ms(now));
@@ -618,6 +740,11 @@ public sealed class SqliteMonitorStore : IMonitorStore
                 cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
                 cmd.ExecuteNonQuery();
             }
+            using (var cmd = Cmd("DELETE FROM long_tx WHERE ended_at IS NOT NULL AND ended_at < $c"))
+            {
+                cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
+                cmd.ExecuteNonQuery();
+            }
             DeleteOrphanSql();
             Compact();
 
@@ -702,7 +829,11 @@ public sealed class SqliteMonitorStore : IMonitorStore
     }
 
     private void DeleteOrphanSql() =>
-        Exec("DELETE FROM sql_text WHERE NOT EXISTS (SELECT 1 FROM session s WHERE s.sql_hash = sql_text.hash)");
+        Exec("""
+            DELETE FROM sql_text
+            WHERE NOT EXISTS (SELECT 1 FROM session s WHERE s.sql_hash = sql_text.hash)
+              AND NOT EXISTS (SELECT 1 FROM long_tx l WHERE l.sql_hash = sql_text.hash)
+            """);
 
     /// <summary>Gives freed pages back to the OS and truncates the WAL.</summary>
     private void Compact()

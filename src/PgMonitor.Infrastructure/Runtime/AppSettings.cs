@@ -85,6 +85,10 @@ public sealed record AppSettings
             }
             errors.AddRange(Email.To.Where(a => !IsAddress(a)).Select(a => $"Alıcı adresi geçersiz: {a}"));
         }
+        if (Incident.LongTransactionThreshold < TimeSpan.FromMinutes(1))
+        {
+            errors.Add("Uzun transaction eşiği en az 1 dakika olmalı.");
+        }
         if (Incident.LockWaitThreshold < TimeSpan.FromSeconds(5))
         {
             errors.Add("Lock bekleme eşiği en az 5 saniye olmalı.");

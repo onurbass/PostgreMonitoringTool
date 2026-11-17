@@ -23,8 +23,12 @@ public sealed partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private string _warnings = "";
     [ObservableProperty] private BlockerRow? _selectedBlocker;
     [ObservableProperty] private SessionRowView? _selectedWaiter;
+    [ObservableProperty] private LongTxRow? _selectedLongTx;
+    [ObservableProperty] private string _longTxCount = "-";
+    [ObservableProperty] private string _longTxHeader = "Uzun transaction'lar";
 
     public ObservableCollection<BlockerRow> Blockers { get; } = [];
+    public ObservableCollection<LongTxRow> LongTransactions { get; } = [];
     public ObservableCollection<SessionRowView> Waiters { get; } = [];
     public ObservableCollection<DatabaseRow> Databases { get; } = [];
     public ObservableCollection<EventRow> Events { get; } = [];
@@ -110,6 +114,12 @@ public sealed partial class DashboardViewModel : ObservableObject
                 g.Count(r => r.IsIdleInTransaction),
                 g.Count(r => r.IsWaitingOnLock))));
         Replace(Events, s.RecentEvents.Reverse().Take(30).Select(EventRow.From));
+
+        LongTxCount = s.LongTransactions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        LongTxHeader = $"Uzun transaction'lar ({s.LongTransactions.Count})";
+        var keep = SelectedLongTx?.Pid;
+        Replace(LongTransactions, s.LongTransactions.Select(t => LongTxRow.From(t, now, apps)));
+        SelectedLongTx = LongTransactions.FirstOrDefault(r => r.Pid == keep);
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> items)

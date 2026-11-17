@@ -39,6 +39,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _normalInterval = "10";
     [ObservableProperty] private string _incidentInterval = "5";
     [ObservableProperty] private string _lockWaitSeconds = "30";
+    [ObservableProperty] private string _longTxMinutes = "10";
     [ObservableProperty] private string _highWaiters = "5";
     [ObservableProperty] private string _criticalWaiters = "20";
     [ObservableProperty] private string _maxStorageMb = "1024";
@@ -88,6 +89,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         NormalInterval = s.Sampling.NormalIntervalSeconds.ToString(CultureInfo.InvariantCulture);
         IncidentInterval = s.Sampling.IncidentIntervalSeconds.ToString(CultureInfo.InvariantCulture);
         LockWaitSeconds = ((int)s.Incident.LockWaitThreshold.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        LongTxMinutes = ((int)s.Incident.LongTransactionThreshold.TotalMinutes).ToString(CultureInfo.InvariantCulture);
         HighWaiters = s.Incident.HighWaiterCount.ToString(CultureInfo.InvariantCulture);
         CriticalWaiters = s.Incident.CriticalWaiterCount.ToString(CultureInfo.InvariantCulture);
         MaxStorageMb = (s.Storage.MaxBytes / 1024 / 1024).ToString(CultureInfo.InvariantCulture);
@@ -161,6 +163,7 @@ public sealed partial class SettingsViewModel : ObservableObject
                 LockWaitThreshold = TimeSpan.FromSeconds(Int(LockWaitSeconds, 30)),
                 HighWaiterCount = Int(HighWaiters, 5),
                 CriticalWaiterCount = Int(CriticalWaiters, 20),
+                LongTransactionThreshold = TimeSpan.FromMinutes(Int(LongTxMinutes, 10)),
             },
             Storage = current.Storage with
             {

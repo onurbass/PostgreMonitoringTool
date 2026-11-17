@@ -259,6 +259,15 @@ Ekranlarda ve maillerde `mendix_satis_db (Satış Portalı)` şeklinde görünü
 | Eşiği aşan | 30 sn'yi aşanlar; olayı ve seviyeyi bunlar belirler |
 | En uzun bekleme | En eski bekleyenin süresi |
 | Görünürlük | Tam / KISMİ |
+| Uzun transaction | Eşikten (varsayılan 10 dk) uzun süredir açık transaction sayısı, kimseyi bloklamasa da |
+
+**Üç süre ne demek?** Tablolarda aynı session için üç ayrı süre görürsün:
+
+| Sütun | Hesap | Ne anlatır |
+|---|---|---|
+| Tx süresi / Transaction yaşı | `now() - xact_start` | Transaction ne kadar süredir açık |
+| **Durum süresi** | `now() - state_change` | Session şu anki durumunda ne kadar süredir bekliyor. `idle in transaction` bir session için: uygulamanın transaction'ı açık bırakıp ne kadar süredir hiçbir şey yapmadığı |
+| Sorgu süresi / Bekleme süresi | `now() - query_start` | `active` ise şu anki sorgunun süresi; değilse son sorgunun başlangıcından beri geçen süre |
 
 **Kök bloklayıcılar (şüpheli):**
 
@@ -274,9 +283,12 @@ Ekranlarda ve maillerde `mendix_satis_db (Satış Portalı)` şeklinde görünü
 **Lock bekleyen session'lar:** En uzun bekleyen en üstte. "Bloklayan" sütunu, bu session'ı doğrudan bekleten PID'dir.
 `0` görürsen beklenen şey bir *prepared transaction*'dır.
 
-**Veritabanları:** Her veritabanındaki session, aktif, `idle in transaction` ve lock bekleyen sayıları.
+Panonun altındaki sekmeler:
 
-**Son olaylar:** Olay açıldı, önem arttı, düzelme başladı, veri alınamıyor gibi olaylar.
+- **Uzun transaction'lar:** Şu an eşikten uzun süredir açık olan transaction'lar. Kimseyi bloklamasalar da listelenirler
+  (ayrıntılar [9a](#9a-uzun-transactionlar) bölümünde).
+- **Veritabanları:** Her veritabanındaki session, aktif, `idle in transaction` ve lock bekleyen sayıları.
+- **Son olaylar:** Olay açıldı, önem arttı, düzelme başladı, veri alınamıyor gibi olaylar.
 
 ---
 
@@ -300,6 +312,25 @@ DB ekibi session'ları temizledikten sonra:
 - Session olaydan sonra listeden kaybolduysa sonlandırılmış **ya da** kendiliğinden bitmiş olabilir. Uygulama ikisini
   ayırt edemez.
 - "Yarıda kaldı" durumu: olay sürerken uygulama kapanmış demektir. O ana kadarki kanıt kayıtlıdır.
+
+### 9a. Uzun transaction'lar
+
+Bir transaction eşikten (varsayılan **10 dakika**, Ayarlar → Eşikler → "Uzun transaction eşiği") uzun süre açık kalırsa,
+**kimseyi bloklamasa bile** listelenir ve kaydedilir.
+
+- **Olay açmaz, mail atmaz.** Sadece gösterir ve kaydeder. Lock olayları ayrıca, kendi kurallarıyla çalışmaya devam eder.
+- **Ne kaydedilir:** Transaction ilk kez eşiği geçtiğinde bir kayıt oluşur: pid, veritabanı, kullanıcı, istemci, durum,
+  bekleme türü ve SQL. Durum veya sorgu değişirse kayıt dakikada en fazla bir kez güncellenir. Bittiğinde son görüldüğü
+  an ve nasıl bittiği yazılır:
+  - *session kayboldu (bitti veya sonlandırıldı – ayırt edilemez)*: DB ekibi sonlandırmış ya da uygulama bağlantıyı
+    kapatmış.
+  - *transaction bitti (session devam ediyor)*: uygulama commit veya rollback yapmış.
+  - *uygulama kapandı – sonu görülmedi*: PgMonitor o sırada kapatılmış.
+- **Nerede:** Panoda canlı liste; geçmişi ana pencerenin **Uzun transaction'lar** sekmesinde (en yeni üstte). Geçmişteki
+  süreler, transaction'ın son görüldüğü ana göredir.
+- **Bağlantı kopması ya da uyku** bir transaction'ı "bitti" saymaz. Ancak uzun süren bir kesintide bitip yeniden başlayan
+  bir transaction görülemez.
+- **Ek yük yok.** Bu bilgilerin hepsi zaten okunan `pg_stat_activity` verisinden çıkar.
 
 ---
 

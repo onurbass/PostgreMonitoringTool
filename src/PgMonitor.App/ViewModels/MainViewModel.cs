@@ -12,6 +12,7 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly MonitorService _service;
     private long _lastIncidentRefreshId = -1;
+    private int _lastLongTxCount = -1;
     private DateTimeOffset _lastStorageCheck = DateTimeOffset.MinValue;
     private string _storageLine = "-";
 
@@ -26,11 +27,13 @@ public sealed partial class MainViewModel : ObservableObject
         Dashboard = new DashboardViewModel();
         Incidents = new IncidentsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
         Settings = new SettingsViewModel();
+        LongTransactions = new LongTransactionsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
         _service.SnapshotReceived += OnSnapshot;
     }
 
     public DashboardViewModel Dashboard { get; }
     public IncidentsViewModel Incidents { get; }
+    public LongTransactionsViewModel LongTransactions { get; }
     public SettingsViewModel Settings { get; }
 
     /// <summary>Raised on the UI thread when an incident opens (for the tray balloon).</summary>
@@ -54,7 +57,9 @@ public sealed partial class MainViewModel : ObservableObject
                 ? $"DEMO – senaryo {settings.DemoScenario} (kurgusal veri, 10× hızlı)"
                 : $"CANLI – {settings.Postgres?.Describe()} (salt okunur) – {settings.Sampling.NormalIntervalSeconds} sn'de bir, olayda {settings.Sampling.IncidentIntervalSeconds} sn";
             _lastIncidentRefreshId = -1;
+            _lastLongTxCount = -1;
             Incidents.Refresh();
+            LongTransactions.Refresh();
             PowerHelper.KeepAwake(settings.KeepAwakeOnAcPower);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.IO.IOException or UnauthorizedAccessException)
@@ -92,6 +97,11 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 _lastIncidentRefreshId = incidentId;
                 Incidents.Refresh();
+            }
+            if (s.LongTransactions.Count != _lastLongTxCount)
+            {
+                _lastLongTxCount = s.LongTransactions.Count;
+                LongTransactions.Refresh(); // a long transaction started or ended
             }
             foreach (var e in s.RecentEvents.Where(e => e.At == s.Sample?.SampledAt &&
                                                         e.Kind is Core.Incidents.IncidentEventKind.Opened or Core.Incidents.IncidentEventKind.Reopened))

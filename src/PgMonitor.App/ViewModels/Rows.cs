@@ -62,14 +62,14 @@ public static class Fmt
     };
 }
 
-public sealed record BlockerRow(string Pid, string Database, string User, string Client, string State, string TxAge, int Blocked, int Depth, string Sql, string FullSql)
+public sealed record BlockerRow(string Pid, string Database, string User, string Client, string State, string TxAge, string StateAge, int Blocked, int Depth, string Sql, string FullSql)
 {
     public static BlockerRow From(RootBlocker r, DateTimeOffset now, IReadOnlyDictionary<string, string> apps)
     {
         ArgumentNullException.ThrowIfNull(r);
         if (r.IsPreparedTransaction)
         {
-            return new("0", "-", "-", "-", "prepared transaction", "-", r.BlockedCount, r.ChainDepth, "", "");
+            return new("0", "-", "-", "-", "prepared transaction", "-", "-", r.BlockedCount, r.ChainDepth, "", "");
         }
         var s = r.Session;
         return new(
@@ -79,6 +79,7 @@ public sealed record BlockerRow(string Pid, string Database, string User, string
             s?.ClientAddress ?? "-",
             s?.State ?? (s is null ? "örnekte yok" : "-"),
             Fmt.Age(now, s?.TransactionStart),
+            Fmt.Age(now, s?.StateChange),
             r.BlockedCount,
             r.ChainDepth,
             Fmt.OneLine(s?.Query),
@@ -86,7 +87,7 @@ public sealed record BlockerRow(string Pid, string Database, string User, string
     }
 }
 
-public sealed record SessionRowView(string Pid, string Database, string User, string Client, string State, string Wait, string TxAge, string QueryAge, string BlockedBy, string Sql, string FullSql, bool IsLockWaiter)
+public sealed record SessionRowView(string Pid, string Database, string User, string Client, string State, string Wait, string TxAge, string StateAge, string QueryAge, string BlockedBy, string Sql, string FullSql, bool IsLockWaiter)
 {
     public static SessionRowView From(SessionRow r, DateTimeOffset now, IReadOnlyDictionary<string, string> apps)
     {
@@ -99,11 +100,43 @@ public sealed record SessionRowView(string Pid, string Database, string User, st
             r.IsRedacted ? "(gizli)" : r.State ?? "-",
             r.WaitEventType is null ? "" : $"{r.WaitEventType}:{r.WaitEvent}",
             Fmt.Age(now, r.TransactionStart),
+            Fmt.Age(now, r.StateChange),
             Fmt.Age(now, r.QueryStart),
             string.Join(",", r.BlockingPids.Distinct()),
             Fmt.OneLine(r.Query),
             r.Query ?? "",
             r.IsWaitingOnLock);
+    }
+}
+
+/// <summary>A transaction over the long-transaction threshold, live or from history.</summary>
+public sealed record LongTxRow(
+    string Pid, string Database, string User, string Client, string State, string Wait,
+    string TxAge, string StateAge, string QueryAge, string FirstSeen, string End, string Sql, string FullSql)
+{
+    public static LongTxRow From(Core.Transactions.LongTransaction t, DateTimeOffset now, IReadOnlyDictionary<string, string> apps)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        var r = t.Session;
+        return new(
+            r.Pid.ToString(CultureInfo.InvariantCulture), Fmt.Db(r.Database, apps), r.UserName ?? "-", r.ClientAddress ?? "-",
+            r.State ?? "-", r.WaitEventType is null ? "" : $"{r.WaitEventType}:{r.WaitEvent}",
+            IncidentEngine.Format(t.TransactionAge), Fmt.Age(now, r.StateChange), Fmt.Age(now, r.QueryStart),
+            Fmt.Time(t.FirstSeen), "sürüyor", Fmt.OneLine(r.Query), r.Query ?? "");
+    }
+
+    /// <summary>Durations are as of the last time the transaction was seen.</summary>
+    public static LongTxRow From(Infrastructure.Storage.StoredLongTransaction s, IReadOnlyDictionary<string, string> apps)
+    {
+        ArgumentNullException.ThrowIfNull(s);
+        var at = s.LastSeen;
+        return new(
+            s.Pid.ToString(CultureInfo.InvariantCulture), Fmt.Db(s.Database, apps), s.UserName ?? "-", s.ClientAddress ?? "-",
+            s.State ?? "-", s.WaitEventType is null ? "" : $"{s.WaitEventType}:{s.WaitEvent}",
+            Fmt.Age(at, s.TransactionStart), Fmt.Age(at, s.StateChange), Fmt.Age(at, s.QueryStart),
+            Fmt.Time(s.FirstSeen),
+            s.EndedAt is null ? "sürüyor" : $"{Fmt.Time(s.LastSeen)} son görüldü – {s.EndReason}",
+            Fmt.OneLine(s.Query), s.Query ?? "");
     }
 }
 

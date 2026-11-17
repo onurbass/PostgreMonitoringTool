@@ -32,6 +32,12 @@ public sealed record IncidentSettings
     /// <summary>A trigger this soon after closing reopens the same incident instead of opening a new one.</summary>
     public TimeSpan ReopenWindow { get; init; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Transactions open longer than this are listed and recorded even if they block nobody (advisory: no incident,
+    /// no mail).
+    /// </summary>
+    public TimeSpan LongTransactionThreshold { get; init; } = TimeSpan.FromMinutes(10);
+
     /// <summary>Two successful samples further apart than this are treated as a gap (sleep, VPN drop).</summary>
     public TimeSpan MaxSampleGap { get; init; } = TimeSpan.FromSeconds(30);
 }

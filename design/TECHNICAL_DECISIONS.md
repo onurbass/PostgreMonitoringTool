@@ -176,6 +176,24 @@ window.
 **Load.** At the defaults, healthy operation is 2 light statements every 10 s (~17 k/day). They read only shared memory;
 nothing touches user tables or takes heavyweight locks.
 
+## D19 - Long transactions: show and record, no alert (2026-11-17)
+**Decision.**
+- A transaction open longer than `LongTransactionThreshold` (default 10 min, minimum 1 min) is tracked whether or not it
+  blocks anyone. The criterion is `now - xact_start`, which also covers `idle in transaction`, because there
+  `state_change >= xact_start`.
+- Identity is `(pid, backend_start, xact_start)`.
+- Storage: one row per transaction in `long_tx` (schema v3), written when it first crosses the threshold, updated at most
+  once a minute when state, wait or statement changes, and closed when it is gone. The end is recorded as "session gone
+  (finished or terminated, indistinguishable)" or "transaction ended, session continues". On restart, still-open rows are
+  closed as "app closed – end not seen".
+- Failed samples never end a tracked transaction. Redacted rows are ignored, because they have no `xact_start`.
+- It never opens an incident and never sends mail (product owner's choice).
+- The UI shows transaction, state and query durations side by side everywhere.
+
+**Why.** A long, non-blocking transaction is the typical precursor of both lock pile-ups and Subtrans overflow, and the
+product owner wants to see it after the DB team cleans up. Not alerting keeps the mail channel for real incidents. The
+tracker reuses the existing activity query, so there is no extra load.
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.

@@ -53,9 +53,9 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="2*"/>
-                        <RowDefinition Height="2*"/>
                         <RowDefinition Height="1.6*"/>
+                        <RowDefinition Height="2*"/>
+                        <RowDefinition Height="2.2*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
@@ -83,6 +83,7 @@
                         <Border Style="{StaticResource Card}"><StackPanel><TextBlock Style="{StaticResource Label}" Text="EŞİĞİ AŞAN"/><TextBlock Style="{StaticResource Value}" Text="{Binding OverThreshold}"/></StackPanel></Border>
                         <Border Style="{StaticResource Card}"><StackPanel><TextBlock Style="{StaticResource Label}" Text="EN UZUN BEKLEME"/><TextBlock Style="{StaticResource Value}" Text="{Binding LongestWait}"/></StackPanel></Border>
                         <Border Style="{StaticResource Card}"><StackPanel><TextBlock Style="{StaticResource Label}" Text="GÖRÜNÜRLÜK"/><TextBlock Style="{StaticResource Value}" Text="{Binding Visibility}"/></StackPanel></Border>
+                        <Border Style="{StaticResource Card}" ToolTip="Eşiği (varsayılan 10 dk) aşan açık transaction sayısı; kimseyi bloklamasa da"><StackPanel><TextBlock Style="{StaticResource Label}" Text="UZUN TRANSACTION"/><TextBlock Style="{StaticResource Value}" Text="{Binding LongTxCount}"/></StackPanel></Border>
                     </WrapPanel>
 
                     <TextBlock Grid.Row="2" Text="{Binding Warnings}" Foreground="{StaticResource Bad}" FontWeight="SemiBold"
@@ -99,6 +100,7 @@
                                 <DataGridTextColumn Header="İstemci" Binding="{Binding Client}"/>
                                 <DataGridTextColumn Header="Durum" Binding="{Binding State}"/>
                                 <DataGridTextColumn Header="Transaction yaşı" Binding="{Binding TxAge}"/>
+                                <DataGridTextColumn Header="Durum süresi" Binding="{Binding StateAge}"/>
                                 <DataGridTextColumn Header="Bekleyen" Binding="{Binding Blocked}"/>
                                 <DataGridTextColumn Header="Derinlik" Binding="{Binding Depth}"/>
                                 <DataGridTextColumn Header="SQL" Binding="{Binding Sql}" Width="*"/>
@@ -122,15 +124,31 @@
                         </DataGrid>
                     </DockPanel>
 
-                    <Grid Grid.Row="5">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="2*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="3*"/>
-                        </Grid.ColumnDefinitions>
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource H2}" Text="Veritabanları"/>
-                            <DataGrid ItemsSource="{Binding Databases}">
+                    <TabControl Grid.Row="5" Margin="0,10,0,0">
+                        <TabItem Header="{Binding LongTxHeader}">
+                            <DockPanel Margin="4">
+                                <TextBlock DockPanel.Dock="Top" Foreground="{StaticResource Muted}" Margin="0,0,0,4"
+                                           Text="Eşikten uzun açık transaction'lar (bloklamasa da). Olay açmaz, mail atmaz; geçmişi 'Uzun transaction'lar' sekmesinde."
+                                           ToolTip="Durum süresi: session'ın şu anki durumunda (örn. idle in transaction) ne kadar beklediği."/>
+                                <TextBox DockPanel.Dock="Bottom" Height="32" Style="{StaticResource SqlBox}" Text="{Binding SelectedLongTx.FullSql, Mode=OneWay}"/>
+                                <DataGrid ItemsSource="{Binding LongTransactions}" SelectedItem="{Binding SelectedLongTx}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="PID" Binding="{Binding Pid}"/>
+                                        <DataGridTextColumn Header="Veritabanı" Binding="{Binding Database}"/>
+                                        <DataGridTextColumn Header="Kullanıcı" Binding="{Binding User}"/>
+                                        <DataGridTextColumn Header="İstemci" Binding="{Binding Client}"/>
+                                        <DataGridTextColumn Header="Durum" Binding="{Binding State}"/>
+                                        <DataGridTextColumn Header="Bekleme" Binding="{Binding Wait}"/>
+                                        <DataGridTextColumn Header="Tx süresi" Binding="{Binding TxAge}"/>
+                                        <DataGridTextColumn Header="Durum süresi" Binding="{Binding StateAge}"/>
+                                        <DataGridTextColumn Header="Sorgu süresi" Binding="{Binding QueryAge}"/>
+                                        <DataGridTextColumn Header="SQL (son sorgu)" Binding="{Binding Sql}" Width="*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </TabItem>
+                        <TabItem Header="Veritabanları">
+                            <DataGrid ItemsSource="{Binding Databases}" Margin="4">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Veritabanı" Binding="{Binding Database}" Width="*"/>
                                     <DataGridTextColumn Header="Session" Binding="{Binding Sessions}"/>
@@ -139,10 +157,9 @@
                                     <DataGridTextColumn Header="Lock bekleyen" Binding="{Binding LockWaiting}"/>
                                 </DataGrid.Columns>
                             </DataGrid>
-                        </DockPanel>
-                        <DockPanel Grid.Column="2">
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource H2}" Text="Son olaylar"/>
-                            <DataGrid ItemsSource="{Binding Events}">
+                        </TabItem>
+                        <TabItem Header="Son olaylar">
+                            <DataGrid ItemsSource="{Binding Events}" Margin="4">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Zaman" Binding="{Binding Time}"/>
                                     <DataGridTextColumn Header="Olay" Binding="{Binding Incident}"/>
@@ -151,8 +168,8 @@
                                     <DataGridTextColumn Header="Ayrıntı" Binding="{Binding Detail}" Width="*"/>
                                 </DataGrid.Columns>
                             </DataGrid>
-                        </DockPanel>
-                    </Grid>
+                        </TabItem>
+                    </TabControl>
 
                     <StackPanel Grid.Row="6" Margin="0,8,0,0">
                         <TextBlock Foreground="{StaticResource Muted}"><Run Text="Depolama: "/><Run Text="{Binding Storage, Mode=OneWay}"/></TextBlock>
@@ -229,6 +246,7 @@
                                     <DataGridTextColumn Header="İstemci" Binding="{Binding Client}"/>
                                     <DataGridTextColumn Header="Durum" Binding="{Binding State}"/>
                                     <DataGridTextColumn Header="Tx yaşı" Binding="{Binding TxAge}"/>
+                                    <DataGridTextColumn Header="Durum süresi" Binding="{Binding StateAge}"/>
                                     <DataGridTextColumn Header="Bekleyen" Binding="{Binding Blocked}"/>
                                     <DataGridTextColumn Header="SQL" Binding="{Binding Sql}" Width="*"/>
                                 </DataGrid.Columns>
@@ -245,6 +263,7 @@
                                     <DataGridTextColumn Header="Durum" Binding="{Binding State}"/>
                                     <DataGridTextColumn Header="Bekleme" Binding="{Binding Wait}"/>
                                     <DataGridTextColumn Header="Tx yaşı" Binding="{Binding TxAge}"/>
+                                    <DataGridTextColumn Header="Durum süresi" Binding="{Binding StateAge}"/>
                                     <DataGridTextColumn Header="Sorgu yaşı" Binding="{Binding QueryAge}"/>
                                     <DataGridTextColumn Header="Bloklayan" Binding="{Binding BlockedBy}"/>
                                     <DataGridTextColumn Header="SQL" Binding="{Binding Sql}" Width="*"/>
@@ -254,6 +273,35 @@
                         <TextBox Grid.Row="6" Style="{StaticResource SqlBox}" Text="{Binding SqlText, Mode=OneWay}"/>
                     </Grid>
                 </Grid>
+            </TabItem>
+
+            <!-- ============================================================ LONG TRANSACTIONS -->
+            <TabItem Header="  Uzun transaction'lar  " DataContext="{Binding LongTransactions}">
+                <DockPanel Margin="8">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Content="Yenile" Command="{Binding RefreshCommand}" Margin="0"/>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource H2}" Margin="0,0,0,2" Text="Eşikten uzun açık kalan transaction'lar (bloklasın ya da bloklamasın)"/>
+                            <TextBlock Foreground="{StaticResource Muted}" Text="{Binding Summary}"/>
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBox DockPanel.Dock="Bottom" Height="80" Style="{StaticResource SqlBox}" Text="{Binding Selected.FullSql, Mode=OneWay}"/>
+                    <DataGrid ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" Margin="0,8,0,0">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="İlk görüldü" Binding="{Binding FirstSeen}"/>
+                            <DataGridTextColumn Header="PID" Binding="{Binding Pid}"/>
+                            <DataGridTextColumn Header="Veritabanı" Binding="{Binding Database}"/>
+                            <DataGridTextColumn Header="Kullanıcı" Binding="{Binding User}"/>
+                            <DataGridTextColumn Header="İstemci" Binding="{Binding Client}"/>
+                            <DataGridTextColumn Header="Son durum" Binding="{Binding State}"/>
+                            <DataGridTextColumn Header="Bekleme" Binding="{Binding Wait}"/>
+                            <DataGridTextColumn Header="Tx süresi" Binding="{Binding TxAge}"/>
+                            <DataGridTextColumn Header="Durum süresi" Binding="{Binding StateAge}"/>
+                            <DataGridTextColumn Header="Bitiş" Binding="{Binding End}"/>
+                            <DataGridTextColumn Header="SQL (son sorgu)" Binding="{Binding Sql}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
             </TabItem>
 
             <!-- ============================================================ SETTINGS -->
@@ -334,7 +382,8 @@
                             <TextBlock Style="{StaticResource H2}" Text="Eşikler"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="3" Text="Uzun transaction eşiği (dk)" VerticalAlignment="Center"/><TextBox Grid.Row="3" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding LongTxMinutes}" ToolTip="Bu süreden uzun açık transaction'lar listelenir ve kaydedilir (olay açmaz, mail atmaz)"/>
                                 <TextBlock Text="Lock bekleme eşiği (sn)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding LockWaitSeconds}"/>
                                 <TextBlock Grid.Row="1" Text="Yüksek: bekleyen sayısı ≥" VerticalAlignment="Center"/><TextBox Grid.Row="1" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding HighWaiters}"/>
                                 <TextBlock Grid.Row="2" Text="Kritik: bekleyen sayısı ≥" VerticalAlignment="Center"/><TextBox Grid.Row="2" Grid.Column="1" Width="80" HorizontalAlignment="Left" Text="{Binding CriticalWaiters}"/>

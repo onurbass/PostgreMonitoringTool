@@ -57,6 +57,26 @@ public sealed record StorageSettings
 /// <summary>Result of a retention / size-cap pass.</summary>
 public sealed record MaintenanceResult(int AggregatesDeleted, int IncidentsDeleted, int SamplesThinned, bool OverCapWithOpenIncidents, StorageReport Report);
 
+/// <summary>A transaction that stayed open longer than the threshold (advisory record, no incident).</summary>
+public sealed record StoredLongTransaction(
+    int Pid,
+    DateTimeOffset? BackendStart,
+    DateTimeOffset TransactionStart,
+    string? Database,
+    string? UserName,
+    string? ApplicationName,
+    string? ClientAddress,
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen,
+    DateTimeOffset? EndedAt,
+    string? EndReason,
+    string? State,
+    string? WaitEventType,
+    string? WaitEvent,
+    DateTimeOffset? QueryStart,
+    DateTimeOffset? StateChange,
+    string? Query);
+
 /// <summary>A queued e-mail. <see cref="Mime"/> is the complete RFC 822 message; it never contains a password.</summary>
 public sealed record OutboxMail(string DedupeKey, long? IncidentId, string Kind, DateTimeOffset CreatedAt, string Subject, byte[] Mime)
 {
@@ -69,6 +89,11 @@ public sealed record OutboxCounts(int Pending, int Sent, int Failed);
 /// <summary>Persistence for aggregates and incident evidence. One instance per database file; single writer.</summary>
 public interface IMonitorStore : IDisposable
 {
+    /// <summary>Inserts or updates long-transaction records (one row per transaction).</summary>
+    void RecordLongTransactions(IReadOnlyList<PgMonitor.Core.Transactions.LongTxEvent> events);
+
+    IReadOnlyList<StoredLongTransaction> ListLongTransactions(int limit = 500);
+
     /// <summary>Queues a mail. Returns false when a mail with the same dedupe key already exists (idempotent).</summary>
     bool EnqueueMail(OutboxMail mail);
 
