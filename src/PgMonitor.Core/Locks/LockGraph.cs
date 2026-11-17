@@ -16,6 +16,7 @@ public sealed record RootBlocker(int Pid, SessionRow? Session, int BlockedCount,
 
 /// <summary>Result of analysing heavyweight-lock waits in one sample. Everything here is Observed or Derived, not guessed.</summary>
 public sealed record LockAnalysis(
+    DateTimeOffset SampledAt,
     IReadOnlyList<SessionRow> Waiters,
     IReadOnlyDictionary<int, IReadOnlyList<int>> BlockedBy,
     IReadOnlyList<RootBlocker> RootBlockers,
@@ -113,7 +114,7 @@ public static class LockGraph
             .Order(StringComparer.Ordinal)
             .ToList();
 
-        return new LockAnalysis(waiters, blockedBy, rootBlockers, longest, databases);
+        return new LockAnalysis(now, waiters, blockedBy, rootBlockers, longest, databases);
     }
 
     private static void Walk(int start, Dictionary<int, List<int>> waitersOf, HashSet<int> seen)

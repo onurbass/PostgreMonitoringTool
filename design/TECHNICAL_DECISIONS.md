@@ -128,6 +128,22 @@ timings. These are checklist items C2-C5 in TEST_PLAN.md.
 
 **Source.** https://www.npgsql.org/doc/connection-string-parameters.html
 
+## D16 - Mail, outbox and runtime loop (2026-11-17)
+**Decision.**
+- Mails are queued in an SQLite `outbox` table (schema v2) with a dedupe key per event and sent by a separate loop.
+- Retry backoff is 1, 2, 4 … 60 min; after 24 h the mail is marked Failed. Opened/Reopened and Closed are always sent;
+  escalations are sent at most once per 10 min per incident.
+- Mail text is Turkish plain text. Root blockers are labelled "şüpheli" (suspected). SQL is cut to `SqlMaxChars`.
+  Demo mails start with `[SİMÜLASYON]` and are only written as `.eml` files.
+- MailKit 5 changed `SmtpClient.SendAsync` to take a `SendRequest` (checked against the package XML docs).
+- The monitor loop samples one at a time (no overlap). Intervals: 5 s healthy, 2 s during an incident, and exponential
+  backoff up to 60 s while failing.
+- A failure in storage or mail is logged by exception type only, and sampling continues.
+- Settings (`settings.json`) contain no password field. Demo is the default mode, and demo and live use different SQLite
+  files.
+
+**Why.** A broken SMTP server or a full disk must never stop evidence collection. The dedupe key makes re-processing safe.
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.

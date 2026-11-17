@@ -15,7 +15,7 @@ namespace PgMonitor.Infrastructure.Storage;
 /// </summary>
 public sealed class SqliteMonitorStore : IMonitorStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     private readonly SqliteConnection _db;
     private readonly string _path;
@@ -127,8 +127,134 @@ public sealed class SqliteMonitorStore : IMonitorStore
                     text TEXT NOT NULL
                 );
                 """);
-            Exec($"PRAGMA user_version = {SchemaVersion.ToString(CultureInfo.InvariantCulture)}");
+            Exec("PRAGMA user_version = 1");
             tx.Commit();
+            version = 1;
+        }
+
+        if (version == 1)
+        {
+            using var tx = _db.BeginTransaction();
+            Exec("""
+                CREATE TABLE outbox (
+                    id              INTEGER PRIMARY KEY,
+                    dedupe_key      TEXT    NOT NULL UNIQUE,
+                    incident_id     INTEGER REFERENCES incident(id) ON DELETE CASCADE,
+                    kind            TEXT    NOT NULL,
+                    created_at      INTEGER NOT NULL,
+                    subject         TEXT    NOT NULL,
+                    mime            BLOB    NOT NULL,
+                    status          TEXT    NOT NULL,
+                    attempts        INTEGER NOT NULL DEFAULT 0,
+                    next_attempt_at INTEGER NOT NULL,
+                    last_error      TEXT,
+                    sent_at         INTEGER
+                );
+                CREATE INDEX ix_outbox_due ON outbox(status, next_attempt_at);
+                """);
+            Exec("PRAGMA user_version = 2");
+            tx.Commit();
+        }
+    }
+
+    // ------------------------------------------------------------------ outbox
+
+    public bool EnqueueMail(OutboxMail mail)
+    {
+        ArgumentNullException.ThrowIfNull(mail);
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                INSERT INTO outbox (dedupe_key, incident_id, kind, created_at, subject, mime, status, next_attempt_at)
+                VALUES ($k, $i, $kind, $c, $s, $m, 'Pending', $c)
+                ON CONFLICT (dedupe_key) DO NOTHING
+                """);
+            cmd.Parameters.AddWithValue("$k", mail.DedupeKey);
+            cmd.Parameters.AddWithValue("$i", mail.IncidentId is { } id && IncidentExists(id) ? id : DBNull.Value);
+            cmd.Parameters.AddWithValue("$kind", mail.Kind);
+            cmd.Parameters.AddWithValue("$c", Ms(mail.CreatedAt));
+            cmd.Parameters.AddWithValue("$s", mail.Subject);
+            cmd.Parameters.AddWithValue("$m", mail.Mime);
+            return cmd.ExecuteNonQuery() == 1;
+        }
+    }
+
+    public IReadOnlyList<OutboxMail> DueMails(DateTimeOffset now, int limit = 10)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                SELECT id, dedupe_key, incident_id, kind, created_at, subject, mime, attempts
+                FROM outbox WHERE status = 'Pending' AND next_attempt_at <= $now
+                ORDER BY next_attempt_at, id LIMIT $n
+                """);
+            cmd.Parameters.AddWithValue("$now", Ms(now));
+            cmd.Parameters.AddWithValue("$n", limit);
+            using var r = cmd.ExecuteReader();
+            var list = new List<OutboxMail>();
+            while (r.Read())
+            {
+                list.Add(new OutboxMail(r.GetString(1), r.IsDBNull(2) ? null : r.GetInt64(2), r.GetString(3), FromMs(r.GetInt64(4)),
+                    r.GetString(5), (byte[])r.GetValue(6))
+                {
+                    Id = r.GetInt64(0),
+                    Attempts = r.GetInt32(7),
+                });
+            }
+            return list;
+        }
+    }
+
+    public void MarkMailSent(long id, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("UPDATE outbox SET status = 'Sent', sent_at = $now, attempts = attempts + 1, last_error = NULL WHERE id = $id");
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$now", Ms(now));
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void MarkMailFailed(long id, DateTimeOffset? nextAttempt, string safeError)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                UPDATE outbox SET attempts = attempts + 1, last_error = $e,
+                    status = CASE WHEN $next IS NULL THEN 'Failed' ELSE 'Pending' END,
+                    next_attempt_at = COALESCE($next, next_attempt_at)
+                WHERE id = $id
+                """);
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$e", safeError);
+            cmd.Parameters.AddWithValue("$next", nextAttempt is null ? DBNull.Value : Ms(nextAttempt.Value));
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public DateTimeOffset? LastMailAt(long incidentId, string kind)
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("SELECT MAX(created_at) FROM outbox WHERE incident_id = $i AND kind = $k");
+            cmd.Parameters.AddWithValue("$i", incidentId);
+            cmd.Parameters.AddWithValue("$k", kind);
+            var v = cmd.ExecuteScalar();
+            return v is null or DBNull ? null : FromMs(Convert.ToInt64(v, CultureInfo.InvariantCulture));
+        }
+    }
+
+    public OutboxCounts MailCounts()
+    {
+        lock (_gate)
+        {
+            using var cmd = Cmd("""
+                SELECT COALESCE(SUM(status = 'Pending'), 0), COALESCE(SUM(status = 'Sent'), 0), COALESCE(SUM(status = 'Failed'), 0) FROM outbox
+                """);
+            using var r = cmd.ExecuteReader();
+            r.Read();
+            return new OutboxCounts(r.GetInt32(0), r.GetInt32(1), r.GetInt32(2));
         }
     }
 
@@ -486,6 +612,11 @@ public sealed class SqliteMonitorStore : IMonitorStore
             {
                 DeleteIncident(id);
                 incidents++;
+            }
+            using (var cmd = Cmd("DELETE FROM outbox WHERE status <> 'Pending' AND created_at < $c"))
+            {
+                cmd.Parameters.AddWithValue("$c", Ms(now - settings.IncidentRetention));
+                cmd.ExecuteNonQuery();
             }
             DeleteOrphanSql();
             Compact();

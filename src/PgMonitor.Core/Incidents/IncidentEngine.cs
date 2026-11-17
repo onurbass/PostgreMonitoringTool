@@ -220,7 +220,7 @@ public static class IncidentEngine
             $"{e.Analysis.WaiterCount} session(s) waiting on locks, {e.QualifyingWaiters} over threshold, longest {Format(e.Analysis.LongestWait)}, " +
             $"{e.Analysis.RootBlockers.Count} root blocker(s), databases: {string.Join(", ", e.Analysis.AffectedDatabases)}");
 
-    internal static string Format(TimeSpan span) =>
+    public static string Format(TimeSpan span) =>
         span.TotalHours >= 1
             ? string.Create(CultureInfo.InvariantCulture, $"{(int)span.TotalHours}h{span.Minutes:00}m")
             : span.TotalMinutes >= 1

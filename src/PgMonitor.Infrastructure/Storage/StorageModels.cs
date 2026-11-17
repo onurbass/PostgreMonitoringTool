@@ -57,9 +57,32 @@ public sealed record StorageSettings
 /// <summary>Result of a retention / size-cap pass.</summary>
 public sealed record MaintenanceResult(int AggregatesDeleted, int IncidentsDeleted, int SamplesThinned, bool OverCapWithOpenIncidents, StorageReport Report);
 
+/// <summary>A queued e-mail. <see cref="Mime"/> is the complete RFC 822 message; it never contains a password.</summary>
+public sealed record OutboxMail(string DedupeKey, long? IncidentId, string Kind, DateTimeOffset CreatedAt, string Subject, byte[] Mime)
+{
+    public long Id { get; init; }
+    public int Attempts { get; init; }
+}
+
+public sealed record OutboxCounts(int Pending, int Sent, int Failed);
+
 /// <summary>Persistence for aggregates and incident evidence. One instance per database file; single writer.</summary>
 public interface IMonitorStore : IDisposable
 {
+    /// <summary>Queues a mail. Returns false when a mail with the same dedupe key already exists (idempotent).</summary>
+    bool EnqueueMail(OutboxMail mail);
+
+    IReadOnlyList<OutboxMail> DueMails(DateTimeOffset now, int limit = 10);
+
+    void MarkMailSent(long id, DateTimeOffset now);
+
+    /// <summary>Records a failed attempt; <paramref name="nextAttempt"/> null means give up.</summary>
+    void MarkMailFailed(long id, DateTimeOffset? nextAttempt, string safeError);
+
+    DateTimeOffset? LastMailAt(long incidentId, string kind);
+
+    OutboxCounts MailCounts();
+
     long MaxIncidentId();
 
     /// <summary>Marks incidents left open by a previous run as Interrupted. Returns how many.</summary>

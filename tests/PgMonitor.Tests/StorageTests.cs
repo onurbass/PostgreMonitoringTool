@@ -63,7 +63,7 @@ public sealed class StorageTests : IDisposable
         using (new SqliteMonitorStore(DbPath))
         {
         }
-        Assert.Equal(1, QueryLong("PRAGMA user_version"));
+        Assert.Equal(2, QueryLong("PRAGMA user_version"));
         using var c = new SqliteConnection($"Data Source={DbPath};Pooling=False");
         c.Open();
         using var cmd = c.CreateCommand();
