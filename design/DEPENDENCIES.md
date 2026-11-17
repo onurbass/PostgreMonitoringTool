@@ -10,7 +10,7 @@ Status: **v2 (2026-11-17).** Versions were checked on nuget.org on this date and
 | Git 2.55 | installed | local version history (no remote) |
 | PostgreSQL, Docker, pgAdmin | not needed | - |
 
-`global.json` pins SDK `10.0.301` with `rollForward: latestFeature`.
+`global.json` requires SDK `10.0.100` or newer within .NET 10 (`rollForward: latestFeature`), so any .NET 10 SDK works (the company PC has 10.0.101, this PC 10.0.301).
 
 ## 2. Target framework
 
