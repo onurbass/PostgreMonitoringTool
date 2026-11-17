@@ -74,8 +74,12 @@ public sealed record EngineState
 public sealed record EngineResult(EngineState State, IReadOnlyList<IncidentEvent> Events, LockEvaluation? Lock);
 
 /// <summary>Lock signal evaluation for one sample.</summary>
+/// <param name="QualifyingWaiters">Waiters whose wait is at or over the threshold.</param>
+/// <param name="AffectedDatabases">Databases of the qualifying waiters only.</param>
+/// <param name="Analysis">Full lock graph of the sample, including short waits.</param>
 public sealed record LockEvaluation(
     bool Triggered,
     Severity Severity,
     int QualifyingWaiters,
+    IReadOnlyList<string> AffectedDatabases,
     Locks.LockAnalysis Analysis);

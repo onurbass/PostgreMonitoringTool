@@ -15,14 +15,20 @@ Status: **v2 (2026-11-17).** Tests run with `dotnet test` on this machine. Only 
 
 | ID | Scenario | Expected |
 |---|---|---|
-| S01 | Healthy 24 h (random churn, short transactions, occasional single Lock wait) | 0 incidents, 0 mails, only aggregate rows |
-| S02 | Single-sample Subtrans blip | 0 incidents |
-| S03 | Subtrans incident: long transaction in app A, waiters spread to B and C, DBA terminates sessions, recovery | 1 incident, opened → escalated → recovering → closed; app A's long transaction is suspect #1; terminated sessions marked "disappeared"; 2 mails |
-| S04 | Flapping around the threshold for 30 min | 1 incident (reopened events), mails ≤ cooldown limit |
-| S05 | Lock chain: idle-in-transaction root blocker, 8 waiters in 2 levels | 1 incident, root blocker identified, chain depth 2 |
-| S06 | Partial visibility (other users' rows redacted) | visibility = Partial, never "healthy" |
-| S07 | Disconnect + laptop sleep gap during an incident | gap events, no recovery during gap, recovery only after fresh clear samples |
-| S08 | `stats_reset` change, postmaster restart, PID reuse with new `backend_start` | no rate spike, baseline reset event, sessions not merged |
+Implemented in `src/PgMonitor.Core/Simulation/Scenarios.cs` and tested in `ScenarioTests.cs` / `SimulatorTests.cs`.
+
+| ID | Scenario | Expected |
+|---|---|---|
+| S01 | Healthy 24 h (random churn, short transactions, short lock waits under 10 s) | 0 incidents |
+| S02 | One sample shows a 40 s lock wait, then it is gone | 1 triggering sample, 0 incidents |
+| S03 | *(M9)* Subtrans incident: long transaction in app A, waiters spread to B and C, DBA terminates sessions | 1 incident; app A's long transaction is suspect #1 |
+| S04 | Lock waits 60 s on / 45 s off for 30 min | 1 incident, never reopened, closed once at the end |
+| S05 | Idle-in-transaction root blocker, 3 direct + 5 indirect waiters, DBA terminates at 15 min | root blocker found, 8 blocked, depth 2, severity High, closed ≥ 3 min after cleanup |
+| S06 | Only one user's rows visible; hidden chain in one DB, visible chain in another | every sample Partial; the hidden chain is not invented; 1 incident for the visible chain |
+| S07 | Incident, connection lost 6-8 min, laptop sleeps 9:30-29:30 | 2 gaps; recovery only ≥ 60 s after the outage; close only ≥ 2 min after waking |
+| S08 | Short lock wait terminated with PID reuse; PostgreSQL restart | 1 ServerChanged event, 0 incidents, same PID seen with two backend_starts |
+
+SLRU counter-reset checks move to M9 together with S03.
 
 ## 3. Unit tests (Core)
 

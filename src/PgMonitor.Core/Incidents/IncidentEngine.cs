@@ -33,18 +33,28 @@ public static class IncidentEngine
             return new(state, events, null);
         }
 
-        // ---- Gap handling for successful samples.
+        // ---- Gap handling for successful samples. After a gap, recovery and post-recovery capture restart.
+        var gapEnded = false;
         if (state.InGap)
         {
             events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Sampling resumed"));
-            state = state with { InGap = false, ClearSince = null };
+            state = state with { InGap = false };
+            gapEnded = true;
         }
         else if (state.LastSuccessAt is { } last && t - last > settings.MaxSampleGap)
         {
             var gap = t - last;
             events.Add(new(IncidentEventKind.GapStarted, openId, last, openSeverity, $"No samples for {Format(gap)} (sleep or network loss)"));
             events.Add(new(IncidentEventKind.GapEnded, openId, t, openSeverity, "Sampling resumed"));
-            state = state with { ClearSince = null };
+            gapEnded = true;
+        }
+        if (gapEnded)
+        {
+            state = state with
+            {
+                ClearSince = null,
+                RecoveringSince = state.Phase == IncidentPhase.Recovering ? t : state.RecoveringSince,
+            };
         }
 
         if (state.Server is { } oldServer && sample.Server is { } newServer &&
@@ -121,22 +131,34 @@ public static class IncidentEngine
         ArgumentNullException.ThrowIfNull(settings);
 
         var analysis = LockGraph.Analyze(sample.Sessions, sample.SampledAt);
-        var qualifying = analysis.Waiters.Count(w => (w.QueryAge(sample.SampledAt) ?? TimeSpan.Zero) >= settings.LockWaitThreshold);
-        if (qualifying == 0)
+
+        // Only waits over the threshold count. Short, normal lock waits elsewhere in the cluster
+        // must neither raise severity nor mark another database as affected.
+        var qualifying = analysis.Waiters
+            .Where(w => (w.QueryAge(sample.SampledAt) ?? TimeSpan.Zero) >= settings.LockWaitThreshold)
+            .ToList();
+        if (qualifying.Count == 0)
         {
-            return new(false, Severity.None, 0, analysis);
+            return new(false, Severity.None, 0, [], analysis);
         }
 
+        var databases = qualifying
+            .Select(w => w.Database)
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
         var severity = Severity.Warning;
-        if (analysis.WaiterCount >= settings.HighWaiterCount || analysis.LongestWait >= settings.HighWait)
+        if (qualifying.Count >= settings.HighWaiterCount || analysis.LongestWait >= settings.HighWait)
         {
             severity = Severity.High;
         }
-        if (analysis.WaiterCount >= settings.CriticalWaiterCount || analysis.AffectedDatabases.Count >= settings.CriticalDatabaseCount)
+        if (qualifying.Count >= settings.CriticalWaiterCount || databases.Count >= settings.CriticalDatabaseCount)
         {
             severity = Severity.Critical;
         }
-        return new(true, severity, qualifying, analysis);
+        return new(true, severity, qualifying.Count, databases, analysis);
     }
 
     private static EngineState Open(EngineState state, LockEvaluation eval, DateTimeOffset t, IncidentSettings settings, List<IncidentEvent> events)
@@ -149,7 +171,7 @@ public static class IncidentEngine
             {
                 ClosedAt = null,
                 Severity = Max(previous.Severity, eval.Severity),
-                Databases = previous.Databases.Union(eval.Analysis.AffectedDatabases),
+                Databases = previous.Databases.Union(eval.AffectedDatabases),
             };
             events.Add(new(IncidentEventKind.Reopened, incident.Id, t, incident.Severity, Describe(eval)));
         }
@@ -161,7 +183,7 @@ public static class IncidentEngine
                 Id = id,
                 OpenedAt = t,
                 Severity = eval.Severity,
-                Databases = eval.Analysis.AffectedDatabases.ToImmutableSortedSet(StringComparer.Ordinal),
+                Databases = eval.AffectedDatabases.ToImmutableSortedSet(StringComparer.Ordinal),
                 Signals = [SignalKind.Lock],
             };
             state = state with { LastIncidentId = id };
@@ -175,7 +197,7 @@ public static class IncidentEngine
     private static EngineState Grow(EngineState state, LockEvaluation eval, DateTimeOffset t, List<IncidentEvent> events)
     {
         var incident = state.Incident!;
-        foreach (var db in eval.Analysis.AffectedDatabases.Where(d => !incident.Databases.Contains(d)))
+        foreach (var db in eval.AffectedDatabases.Where(d => !incident.Databases.Contains(d)))
         {
             incident = incident with { Databases = incident.Databases.Add(db) };
             events.Add(new(IncidentEventKind.DatabaseAffected, incident.Id, t, incident.Severity, $"Lock waits now also in database '{db}'"));

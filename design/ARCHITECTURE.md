@@ -99,7 +99,8 @@ Each sample computes these signal families separately:
 | **Subtrans** (second phase) | `≥ 3` sessions waiting on `LWLock:SubtransSLRU` or `SubtransBuffer` | yes |
 | LWLock (other) (second phase) | `≥ 20` sessions waiting on any other LWLock | yes |
 
-Lock severity:
+Lock severity (counts only waiters over the 30 s threshold, so short normal waits elsewhere never escalate an incident or
+mark another database as affected):
 
 | Severity | Condition |
 |---|---|

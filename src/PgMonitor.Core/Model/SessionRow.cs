@@ -2,14 +2,15 @@ namespace PgMonitor.Core.Model;
 
 /// <summary>
 /// Stable identity of a backend session. PIDs are reused by the OS, so the backend start time is part of the key.
+/// BackendStart is null when PostgreSQL hides it (row of another user without pg_read_all_stats).
 /// </summary>
-public readonly record struct SessionKey(int Pid, DateTimeOffset BackendStart);
+public readonly record struct SessionKey(int Pid, DateTimeOffset? BackendStart);
 
 /// <summary>One client backend row from pg_stat_activity, as observed in a single sample.</summary>
 public sealed record SessionRow
 {
     public required int Pid { get; init; }
-    public required DateTimeOffset BackendStart { get; init; }
+    public DateTimeOffset? BackendStart { get; init; }
     public string? Database { get; init; }
     public string? UserName { get; init; }
     public string? ApplicationName { get; init; }

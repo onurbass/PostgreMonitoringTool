@@ -82,6 +82,22 @@ public class IncidentEngineTests
         Assert.Equal(Severity.Critical, IncidentEngine.EvaluateLock(sample, Settings).Severity);
     }
 
+    [Fact]
+    public void Short_wait_in_another_database_neither_escalates_nor_adds_scope()
+    {
+        var sample = Sample(T0,
+            IdleInTx(100, T0, TimeSpan.FromMinutes(5)),
+            LockWaiter(200, T0, Long, "app_orchid_db", 100),
+            Idle(300, "app_lotus_db") with { State = "active" },
+            LockWaiter(301, T0, TimeSpan.FromSeconds(2), "app_lotus_db", 300));
+
+        var eval = IncidentEngine.EvaluateLock(sample, Settings);
+
+        Assert.Equal(Severity.Warning, eval.Severity);
+        Assert.Equal(["app_orchid_db"], eval.AffectedDatabases);
+        Assert.Equal(2, eval.Analysis.WaiterCount); // still visible in the full analysis
+    }
+
     // ---------- Opening and deduplication
 
     [Fact]
