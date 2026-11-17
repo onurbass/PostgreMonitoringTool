@@ -108,6 +108,26 @@ statement started, which is an upper bound of the lock wait. PG15 has no per-loc
 rows but carry no lock evidence.
 **Source.** https://www.sqlite.org/pragma.html#pragma_auto_vacuum
 
+## D15 - Live connection details (2026-11-17)
+**Decision.**
+- One pooled Npgsql data source (max 2 connections) using `Options=-c default_transaction_read_only=on -c statement_timeout=3000`,
+  a 4 s client command timeout and the application name `PgMonitor (read-only)`, so the DB team can see and identify the
+  monitor.
+- Every new connection runs `SHOW default_transaction_read_only`. Anything other than `on` refuses monitoring.
+- Each sample runs two catalog statements: server identity, then activity.
+- Rows are redacted when `query = '<insufficient privilege>'` or `state` is NULL. Visibility is Partial if any row is
+  redacted, otherwise Full.
+- Errors are reduced to a kind plus SQLSTATE. Exception messages are never logged, because they can contain host or
+  user names.
+
+**Why.** The server-side timeout protects the cluster even if the client is stuck. The application name makes the monitor
+transparent to the DB team.
+
+**What only the company run can confirm.** Real column types, the exact redaction behaviour of the account, and query
+timings. These are checklist items C2-C5 in TEST_PLAN.md.
+
+**Source.** https://www.npgsql.org/doc/connection-string-parameters.html
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.
