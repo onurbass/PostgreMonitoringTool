@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PgMonitor.App/PgMonitor.App.csproj" />
+    <Project Path="src/PgMonitor.Core/PgMonitor.Core.csproj" />
+    <Project Path="src/PgMonitor.Infrastructure/PgMonitor.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PgMonitor.Tests/PgMonitor.Tests.csproj" />
+  </Folder>
+</Solution>

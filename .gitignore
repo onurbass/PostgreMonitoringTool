@@ -55,3 +55,15 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+## ---- PgMonitor project-specific ----
+# Local runtime data: never commit
+*.db
+*.db-wal
+*.db-shm
+logs/
+mail-drop/
+appsettings.local.json
+
+# Contains real company database names; keep local only
+sql.txt
