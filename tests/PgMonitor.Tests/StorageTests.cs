@@ -72,6 +72,30 @@ public sealed class StorageTests : IDisposable
     }
 
     [Fact]
+    public void Version_1_database_is_upgraded_and_keeps_its_data()
+    {
+        using (var store = new SqliteMonitorStore(DbPath))
+        {
+            store.UpsertIncident(Incident(7, T0, T0.AddMinutes(5)), IncidentStatus.Closed);
+        }
+        using (var c = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            c.Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "DROP TABLE outbox; PRAGMA user_version = 1;"; // what an M3-era file looks like
+            cmd.ExecuteNonQuery();
+        }
+
+        using (var store = new SqliteMonitorStore(DbPath))
+        {
+            Assert.Equal(7, Assert.Single(store.ListIncidents()).Id);
+            Assert.True(store.EnqueueMail(new OutboxMail("k1", 7, "Closed", T0, "s", [1, 2, 3])));
+            Assert.Equal(new OutboxCounts(1, 0, 0), store.MailCounts());
+        }
+        Assert.Equal(2, QueryLong("PRAGMA user_version"));
+    }
+
+    [Fact]
     public void Newer_schema_is_refused()
     {
         using (new SqliteMonitorStore(DbPath))
