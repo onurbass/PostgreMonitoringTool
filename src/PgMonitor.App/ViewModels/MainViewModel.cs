@@ -29,8 +29,11 @@ public sealed partial class MainViewModel : ObservableObject
         Settings = new SettingsViewModel();
         LongTransactions = new LongTransactionsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
         LockWaits = new LockWaitsViewModel(() => _service.Store, () => _service.Settings.DatabaseApps);
+        AlarmPreview = new AlarmPreviewViewModel();
         _service.SnapshotReceived += OnSnapshot;
     }
+
+    public AlarmPreviewViewModel AlarmPreview { get; }
 
     public DashboardViewModel Dashboard { get; }
     public IncidentsViewModel Incidents { get; }
@@ -94,6 +97,7 @@ public sealed partial class MainViewModel : ObservableObject
                     $"{(r.TotalBytes / 1024.0 / 1024.0):0.0} MB (WAL {(r.WalBytes / 1024.0 / 1024.0):0.0} MB) • {r.IncidentCount} olay • {r.AggregateRows} dakika özeti");
             }
             Dashboard.Apply(s, _service.Settings.DatabaseApps, _storageLine);
+            AlarmPreview.Apply(s, _service.Settings.DatabaseApps);
 
             var incidentId = s.State.Incident?.Id ?? 0;
             var changed = s.RecentEvents.Count > 0 && s.RecentEvents[^1].At >= (s.Sample?.SampledAt ?? DateTimeOffset.MaxValue);

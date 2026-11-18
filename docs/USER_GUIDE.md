@@ -454,6 +454,21 @@ bilgilerini paylaşmadan önce kontrol et.
 
 ---
 
+## 14a. Şirket alarmı önizlemesi
+
+Şirketin SQL alarm sistemi (izleme ekibi) için hazırlanan lock alarm sorgusu [ALARM_REQUEST.md](ALARM_REQUEST.md)
+belgesindedir. Ana penceredeki **Alarm önizleme** sekmesi bu sorgunun kuralını, uygulamanın o an elindeki örneğe uygulayıp
+"alarm çalar mı, hangi veritabanı için" sorusunu iki seviyede (erken uyarı, kritik) gösterir.
+
+- Veritabanına **ek sorgu göndermez** ve alarm üretmez; yalnızca mevcut örneği yorumlar.
+- Demo modunda senaryoları (örn. S05) izleyerek alarmın ne zaman çalacağını görebilirsin.
+- Canlı modda, şirket alarmı ile aynı kararı verip vermediğini karşılaştırmak için kullanılabilir.
+- Aynı sekmedeki SQL kutuları, formdaki SQL alanına yapıştırılacak metindir.
+- Bu sekme, SQL'in kendisini doğrulamaz; yalnızca kuralın mantığını gösterir. SQL'in gerçek davranışı için
+  ALARM_REQUEST.md içindeki zararsız lock testi (advisory lock) kullanılır.
+
+---
+
 ## 15. Bilinen sınırlar
 
 - **Örnekleme aralığı:** 10 saniyede bir (olayda 5 sn) bakıldığı için birkaç saniyelik lock'lar görülmeyebilir. Bu

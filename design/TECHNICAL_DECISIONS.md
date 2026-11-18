@@ -211,6 +211,29 @@ tracker reuses the existing activity query, so there is no extra load.
 **Why.** The product owner saw a lock wait appear and vanish from the dashboard with no trace. These records stay local
 and add no query or session to the server.
 
+## D21 - Company SQL alarm for lock culprits (2026-11-18)
+**Decision.**
+- The product owner is in the governance team and can request SQL alarms from the company monitoring team (form: SQL,
+  read-only user, condition, frequency). The lock alarm is therefore also delivered as a SQL for that process, in
+  addition to the local tool. The monitoring team's service account replaces the personal account.
+- Rule: a session that blocks a lock waiter (`pg_blocking_pids`), is not itself waiting for a lock, and has been in its
+  current state for at least N seconds, with a waiter that has waited at least M seconds. Result: one row per database of the
+  blocker (the app name is derived from it). Two levels: early (M=30, N=120) and critical (M=60, N=180). The product owner's
+  existing practice is a 5-minute kill script in the apps, so both levels stay below 5 minutes and fire first.
+- The rule uses the blocker's **state duration** (`state_change`), as observed by the product owner: a session stuck in
+  one state, typically `idle in transaction`, is the usual culprit. A waiter's own state duration only says how long it
+  has waited, so it is not used to find the culprit. Long-running but busy transactions (Subtrans-type) are not covered by this
+  rule; they need a separate transaction-age or Subtrans-wait alarm.
+- This SQL is **not** in `SqlCatalog` and the application never sends it to a server (SqlCatalog stays the only
+  executable SQL). `AlarmQuery.Evaluate` mirrors it in C# for the demo preview tab, the scenario tests and a live
+  cross-check. The mirror does not prove the SQL; a guard test only checks that the generated SQL is read-only.
+- Scenario tests simulate a once-a-minute poll. Findings: a single-sample blip fires the early level once, and flapping
+  short chains fire it in isolated minutes only. Hence the recommendation to ask for "N consecutive checks".
+- Hidden sessions (no `pg_read_all_stats`) are invisible to the SQL, so the alarm stays silent for them; the service account
+  needs `pg_monitor`.
+- Safe validation on a real database: two sessions and `pg_advisory_xact_lock` on an arbitrary number. This touches no table.
+  Steps are in docs/ALARM_REQUEST.md.
+
 ## D12 - Laptop operation (2026-11-17)
 **Decision.**
 - Gaps from sleep or network loss are recorded and never treated as recovery.

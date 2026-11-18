@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     public void SaveTabSnapshots(string folder)
     {
         Directory.CreateDirectory(folder);
-        string[] names = ["1-pano", "2-olaylar", "3-lock-beklemeleri", "4-uzun-transactionlar", "5-ayarlar"];
+        string[] names = ["1-pano", "2-olaylar", "3-lock-beklemeleri", "4-uzun-transactionlar", "5-alarm-onizleme", "6-ayarlar"];
         for (var i = 0; i < names.Length; i++)
         {
             Tabs.SelectedIndex = i;

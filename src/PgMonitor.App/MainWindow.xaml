@@ -345,6 +345,52 @@
                 </DockPanel>
             </TabItem>
 
+            <!-- ============================================================ COMPANY ALARM PREVIEW -->
+            <TabItem Header="  Alarm önizleme  " DataContext="{Binding AlarmPreview}">
+                <TabItem.Resources>
+                    <DataTemplate DataType="{x:Type vm:AlarmTierViewModel}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" FontSize="13" Text="{Binding Title}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <Border DockPanel.Dock="Top" CornerRadius="6" Padding="12,8" Margin="0,0,0,8">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource Accent}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="Ok"><Setter Property="Background" Value="{StaticResource Ok}"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="Warn"><Setter Property="Background" Value="{StaticResource Warn}"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding StatusKind}" Value="Bad"><Setter Property="Background" Value="{StaticResource Bad}"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding Status}" Foreground="White" FontWeight="Bold" FontSize="14" TextWrapping="Wrap"/>
+                            </Border>
+                            <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding Rows}" Height="96">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="veritabani" Binding="{Binding Database}" Width="*"/>
+                                    <DataGridTextColumn Header="bloklayan__session" Binding="{Binding Blockers}"/>
+                                    <DataGridTextColumn Header="bekleyen__session" Binding="{Binding Waiters}"/>
+                                    <DataGridTextColumn Header="en__uzun__durum__sn" Binding="{Binding MaxState}"/>
+                                    <DataGridTextColumn Header="en__uzun__bekleme__sn" Binding="{Binding MaxWait}"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" Margin="0,10,0,0" Text="FORMDAKİ SQL ALANINA YAPIŞTIRILACAK METİN"/>
+                            <TextBox Style="{StaticResource SqlBox}" Text="{Binding Sql, Mode=OneWay}"/>
+                        </DockPanel>
+                    </DataTemplate>
+                </TabItem.Resources>
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Style="{StaticResource H2}" Margin="0,0,0,2" Text="Şirket alarm sorgusu: bu veriyle ne döndürürdü?"/>
+                        <TextBlock Foreground="{StaticResource Muted}" TextWrapping="Wrap" Text="{Binding Note}" Margin="0,0,0,8"/>
+                    </StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <ContentControl Content="{Binding Early}"/>
+                        <ContentControl Grid.Column="2" Content="{Binding Critical}"/>
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+
             <!-- ============================================================ SETTINGS -->
             <TabItem Header="  Ayarlar  " DataContext="{Binding Settings}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">

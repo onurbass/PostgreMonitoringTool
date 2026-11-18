@@ -40,5 +40,6 @@ Data, logs and settings live in `%LOCALAPPDATA%\PgMonitor`. Command-line options
 - [Dependencies](design/DEPENDENCIES.md)
 - [Test plan](design/TEST_PLAN.md)
 - [Technical decisions](design/TECHNICAL_DECISIONS.md)
+- [Company SQL alarm request (Turkish)](docs/ALARM_REQUEST.md)
 
 License: MIT
