@@ -7,24 +7,25 @@ Burada sunucu, kullanıcı ya da veritabanı adı yoktur; `<...>` ile gösterile
 
 İzleme sistemi aşağıdaki SQL'i **dakikada bir** çalıştırır. Sorgu şu soruyu sorar:
 
-> Lock yüzünden birini **30 saniyeden uzun** süredir bekleten ve kendisi **120 saniyeden uzun** süredir aynı durumda
-> takılı kalmış bir session var mı? Varsa hangi veritabanında (yani hangi uygulamada)?
+> Lock yüzünden birini **30 saniyeden uzun** süredir bekleten ve transaction'ını (dolayısıyla kilitlerini) **120 saniyeden
+> uzun** süredir açık tutan bir session var mı? Varsa hangi veritabanında (yani hangi uygulamada)?
 
 - **Sorun yokken sorgu satır döndürmez**, sadece başlıklar gelir.
 - Sorun varsa **bloklayan session'ın veritabanı başına bir satır** döner. Veritabanı adı kaynak uygulamayı verir.
 - Tek bir sorgu cluster'daki tüm uygulamaları kapsar; uygulama başına ayrı alarm gerekmez.
 - Alarm yalnızca haber verir. Hiçbir session'ı sonlandırmaz; uygulamaların kendi 5 dakikalık script'i aynen devam eder.
-  Alarm bu script'ten **önce** çalar: bloklayan session 120 saniyeye ulaştıktan sonraki ilk kontrolde, yani en geç yaklaşık
-  3 dakikada.
+  Alarm bu script'ten **önce** çalar: bloklayanın transaction'ı 120 saniyeyi geçtikten sonraki ilk kontrolde, yani en geç
+  yaklaşık 3 dakikada.
 
 ## SQL
 
-Tek seviye vardır (bekleyen ≥ 30 sn, bloklayan aynı durumda ≥ 120 sn):
+Tek seviye vardır (bekleyen ≥ 30 sn, bloklayanın transaction'ı ≥ 120 sn açık):
 
 ```sql
 SELECT b.datname                                            AS veritabani,
        count(DISTINCT b.pid)                                AS bloklayan_session,
        count(DISTINCT w.pid)                                AS bekleyen_session,
+       max(extract(epoch FROM now() - b.xact_start))::int   AS en_uzun_tx_sn,
        max(extract(epoch FROM now() - b.state_change))::int AS en_uzun_durum_sn,
        max(extract(epoch FROM now() - w.query_start))::int  AS en_uzun_bekleme_sn
 FROM pg_stat_activity w
@@ -33,9 +34,22 @@ JOIN pg_stat_activity b ON b.pid = bp.pid
 WHERE w.wait_event_type = 'Lock'
   AND w.query_start < now() - interval '30 seconds'
   AND b.wait_event_type IS DISTINCT FROM 'Lock'
-  AND b.state_change < now() - interval '120 seconds'
+  AND b.xact_start < now() - interval '120 seconds'
 GROUP BY b.datname
 ```
+
+### Neden "durum süresi" değil "transaction süresi"
+
+Kilitler transaction bitene kadar tutulur. Bu yüzden "120 saniyeden fazla locklayan" ifadesinin veritabanındaki en yakın
+karşılığı **transaction süresidir** (`xact_start`).
+
+Durum süresi (`state_change`), session'ın her yeni sorguda sıfırlanır. Sürekli sorgu çalıştıran ama transaction'ını kapatmayan
+bir uygulama (ilk ekran görüntüsündeki gibi: transaction 1:43 saat açık, durum süresi 1 sn) durum süresine bakan bir kuralı
+**hiç tetiklemez**, oysa başkalarını saatlerce bekletir. Transaction süresi bu durumu yakalar. `idle in transaction` olarak
+takılı kalan session'ları da yakalar, çünkü onların transaction süresi her zaman durum süresinden uzundur.
+
+Durum süresi sonuçta yine gösterilir: `en_uzun_durum_sn` transaction süresine yakınsa session **takılı**dır (genelde
+`idle in transaction`). Çok kısaysa session **çalışıyor ama transaction'ı uzun**dur.
 
 Sondaki noktalı virgül bilerek konmadı; aracın kabul ediyorsa eklenebilir, fark etmez.
 
@@ -46,13 +60,14 @@ Sondaki noktalı virgül bilerek konmadı; aracın kabul ediyorsa eklenebilir, f
 3. `b` = **bloklayan**: bulunan PID'nin kendi satırı.
 4. `b.wait_event_type IS DISTINCT FROM 'Lock'`: bloklayanın kendisi lock beklemesin; böylece zincirin ortasındakiler elenir,
    **zincirin başı** kalır. (`IS DISTINCT FROM` kullanıldı, çünkü lock beklemeyen bir session'ın bekleme türü boş olabilir.)
-5. `b.state_change < now() - 120 s`: bloklayan **120 saniyeden uzun süredir aynı durumda** (`idle in transaction` ise
-   hareketsiz, `active` ise aynı sorgu çalışıyor).
+5. `b.xact_start < now() - 120 s`: bloklayanın transaction'ı **120 saniyeden uzun süredir açık**; kilitlerini en az bu kadar
+   süredir tutuyor olabilir.
 6. `GROUP BY b.datname`: sonuç, bloklayanın veritabanı başına tek satır.
 
 Sütunlar: `bloklayan_session` (o veritabanındaki farklı bloklayıcı sayısı), `bekleyen_session` (onları **doğrudan**
-bekleyen farklı session sayısı), `en_uzun_durum_sn` (bloklayanın aynı durumda en uzun kaldığı süre) ve
-`en_uzun_bekleme_sn` (bekleyenin en uzun bekleme süresi).
+bekleyen farklı session sayısı), `en_uzun_tx_sn` (bloklayanın transaction'ının en uzun açık kaldığı süre),
+`en_uzun_durum_sn` (bloklayanın aynı durumda en uzun kaldığı süre) ve `en_uzun_bekleme_sn` (bekleyenin en uzun bekleme
+süresi).
 
 ## Form alanları
 
@@ -71,15 +86,16 @@ bekleyen farklı session sayısı), `en_uzun_durum_sn` (bloklayanın aynı durum
 
 ### İstek açıklaması (öneri)
 
-> Ortak PostgreSQL cluster'ında bir session, başka session'ları 30 saniyeden uzun süredir lock ile bekletiyor ve kendisi
-> 2 dakikadan uzun süredir aynı durumda (genellikle `idle in transaction`) takılı kalmış. Sorgu, bloklayan session'ın
-> veritabanını döndürür; veritabanı adı kaynak uygulamayı gösterir. Amaç, uygulama ekipleri haber vermeden önce lock
-> kaynağı olan uygulamayı bulmak ve ilgili ekibi bilgilendirmektir.
+> Ortak PostgreSQL cluster'ında bir session, başka session'ları 30 saniyeden uzun süredir lock ile bekletiyor ve kendi
+> transaction'ını 2 dakikadan uzun süredir açık tutuyor (takılı kalmış ya da kapatılmamış transaction). Sorgu, bloklayan
+> session'ın veritabanını döndürür; veritabanı adı kaynak uygulamayı gösterir. Amaç, uygulama ekipleri haber vermeden önce
+> lock kaynağı olan uygulamayı bulmak ve ilgili ekibi bilgilendirmektir.
 
 ### Alarm mesajı (öneri)
 
 > `<veritabani>` veritabanında `<bekleyen_session>` session, en uzun `<en_uzun_bekleme_sn>` sn'dir lock bekliyor.
-> Bekleten `<bloklayan_session>` session `<en_uzun_durum_sn>` sn'dir aynı durumda takılı (kök neden için şüpheli).
+> Bekleten `<bloklayan_session>` session'ın transaction'ı `<en_uzun_tx_sn>` sn'dir açık, `<en_uzun_durum_sn>` sn'dir aynı
+> durumda (kök neden için şüpheli).
 
 ### Instruction – Event Management System (SCC için, öneri)
 
@@ -95,9 +111,9 @@ bekleyen farklı session sayısı), `en_uzun_durum_sn` (bloklayanın aynı durum
 3. Birkaç gün normal çalıştır. Bu sürede şunlara bak:
    - **Hiç alarm gelmiyorsa:** normaldir. Yetki sorununu (aşağıda 1. adım) elemek için doğrulama testini yap.
    - **Gereksiz alarm geliyorsa:** hangi bloklayan durumunda geldiğine bak (`idle in transaction` mı, `active` mi). Uzun çalışan
-     meşru bir toplu işlem (`active`) alarmı tetikliyorsa, sadece `idle in transaction` olanlara daralt: `b.state_change`
-     satırının altına `AND b.state = 'idle in transaction'` ekle. Bu, aktif ama çok uzun süren sorguları artık yakalamaz;
-     hangisini istediğine sen karar ver.
+     meşru bir toplu işlem (`active`) alarmı tetikliyorsa, sadece `idle in transaction` olanlara daralt: `b.xact_start`
+     satırının altına `AND b.state = 'idle in transaction'` ekle. Bu, sürekli sorgu çalıştıran uzun transaction'ları
+     (ilk ekran görüntüsündeki türü) artık yakalamaz; hangisini istediğine sen karar ver.
    - **Anlık, kendiliğinden geçen takılmalar alarm üretiyorsa:** izleme ekibinden "art arda 2 kontrolde" koşulunu iste.
 4. Memnun kalınca seviyeyi **Critical** yap.
 
@@ -116,7 +132,8 @@ bekleyen farklı session sayısı), `en_uzun_durum_sn` (bloklayanın aynı durum
 | Senaryo | Sonuç |
 |---|---|
 | Sağlıklı gün (24 saat) | Hiç çalmaz |
-| 10 dk süren zincir (idle in transaction kök, 3 doğrudan + 5 dolaylı bekleyen) | 6. dakikada çalar (bloklayan o an 149 sn takılı, yani 5 dakikalık script'ten önce); temizlikten sonra susar |
+| 10 dk süren zincir (idle in transaction kök, 3 doğrudan + 5 dolaylı bekleyen) | 6. dakikada çalar (bloklayanın transaction'ı o an 180 sn açık, 149 sn'dir hareketsiz; 5 dakikalık script'ten önce); temizlikten sonra susar |
+| Sürekli sorgu çalıştıran 10 dk'lık transaction (durum süresi 1 sn) bir session'ı bekletiyor | Çalar; durum süresine bakan bir kural burada hiç çalmazdı |
 | Tek örneklik 40 sn'lik takılma | **Bir kez** çalar |
 | 30 dk boyunca gelip giden kısa lock'lar | Yalnızca **birbirinden ayrı** dört dakikada çalar. "Art arda 2 kontrol" koşulu bunların hepsini eler |
 | Başka kullanıcının gizli session'ları | Alarm **sessiz kalır**; yalnızca görünen zincir bulunur |
@@ -127,9 +144,10 @@ Uygulamanın **Alarm önizleme** sekmesi bu kuralı demo ya da canlı örnek üz
 
 ## Doğrulama
 
-Sorgunun ilk sürümü (bekleyen süresi şartı ve `en_uzun_bekleme_sn` sütunu olmadan) şirketteki PostgreSQL 15'te hata vermeden
-çalıştı; sorun yokken başlıklarla boş döndü. **Bu belgedeki güncel sürüm, bu iki eklemeyle birlikte henüz gerçek bir veritabanında
-çalıştırılmadı.** Önce bir kez çalıştırıp hata vermediğini görün. Davranışını denemek için:
+Sorgunun ilk sürümü şirketteki PostgreSQL 15'te hata vermeden çalıştı; sorun yokken başlıklarla boş döndü. O sürümde bekleyen
+süresi şartı, `en_uzun_tx_sn` ve `en_uzun_bekleme_sn` sütunları yoktu ve bloklayan için `xact_start` yerine `state_change`
+kullanılıyordu. **Bu belgedeki güncel sürüm henüz gerçek bir veritabanında çalıştırılmadı.** Önce bir kez çalıştırıp hata
+vermediğini görün. Davranışını denemek için:
 
 ### 1. Yetki kontrolü (servis hesabıyla)
 

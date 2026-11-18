@@ -25,7 +25,8 @@ public partial class AlarmQueryTests
         var sql = AlarmQuery.Sql(tier);
 
         Assert.Contains($"w.query_start < now() - interval '{waiter} seconds'", sql, StringComparison.Ordinal);
-        Assert.Contains($"b.state_change < now() - interval '{blocker} seconds'", sql, StringComparison.Ordinal);
+        Assert.Contains($"b.xact_start < now() - interval '{blocker} seconds'", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("b.state_change <", sql, StringComparison.Ordinal); // state duration is reported, not a condition
         Assert.DoesNotContain("{", sql, StringComparison.Ordinal);
 
         Assert.Equal("SELECT", FirstWord().Match(sql).Value.ToUpperInvariant());
@@ -55,15 +56,16 @@ public partial class AlarmQueryTests
 
     // ------------------------------------------------------------------ the mirror on hand-made samples
 
-    private static SessionRow Blocker(int pid, DateTimeOffset now, TimeSpan stateAge, string db = "app_orchid_db", string state = "idle in transaction") =>
+    /// <summary>A blocking session whose transaction is <paramref name="txAge"/> old; by default it has been stuck in its state for all of it.</summary>
+    private static SessionRow Blocker(int pid, DateTimeOffset now, TimeSpan txAge, string db = "app_orchid_db", string state = "idle in transaction", TimeSpan? stateAge = null) =>
         Idle(pid, db) with
         {
             State = state,
             WaitEventType = state == "active" ? null : "Client",
             WaitEvent = state == "active" ? null : "ClientRead",
-            TransactionStart = now - stateAge - TimeSpan.FromMinutes(1),
-            QueryStart = now - stateAge,
-            StateChange = now - stateAge,
+            TransactionStart = now - txAge,
+            QueryStart = now - (stateAge ?? txAge),
+            StateChange = now - (stateAge ?? txAge),
         };
 
     [Fact]
@@ -76,7 +78,21 @@ public partial class AlarmQueryTests
 
         var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Standard));
 
-        Assert.Equal(new AlarmRow("app_orchid_db", 1, 2, 300, 45), row);
+        Assert.Equal(new AlarmRow("app_orchid_db", 1, 2, 300, 300, 45), row);
+    }
+
+    [Fact]
+    public void Busy_long_transaction_that_keeps_running_statements_is_caught()
+    {
+        // The case behind the first screenshot: the transaction is 10 minutes old but its state changed 1 s ago because it keeps
+        // running statements. A rule on state duration alone never fires here; the transaction-age rule does.
+        var s = Sample(T0,
+            Blocker(100, T0, TimeSpan.FromMinutes(10), state: "active", stateAge: TimeSpan.FromSeconds(1)),
+            LockWaiter(200, T0, TimeSpan.FromMinutes(6), blockedBy: 100));
+
+        var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Standard));
+        Assert.Equal(600, row.MaxTransactionSeconds);
+        Assert.Equal(1, row.MaxStateSeconds); // busy, not stuck: visible in the message
     }
 
     [Fact]
@@ -188,9 +204,10 @@ public partial class AlarmQueryTests
         Assert.Equal("app_orchid_db", first.Database);
         Assert.Equal(1, first.Blockers);
         Assert.Equal(3, first.Waiters);             // the 5 second-level waiters wait for a waiter, not for the root
-        Assert.Equal(149, first.MaxStateSeconds);
+        Assert.Equal(180, first.MaxTransactionSeconds); // the root's transaction began at minute 3
+        Assert.Equal(149, first.MaxStateSeconds);       // idle in transaction since 4:31: stuck
         Assert.Equal(60, first.MaxWaitSeconds);
-        Assert.True(first.MaxStateSeconds < 300, "the alarm comes before the apps' own 5-minute kill script acts");
+        Assert.True(first.MaxTransactionSeconds < 300, "the alarm comes before the apps' own 5-minute kill script acts");
     }
 
     [Fact]

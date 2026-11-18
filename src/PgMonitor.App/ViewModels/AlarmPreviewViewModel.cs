@@ -7,7 +7,7 @@ using PgMonitor.Infrastructure.Runtime;
 
 namespace PgMonitor.App.ViewModels;
 
-public sealed record AlarmRowView(string Database, int Blockers, int Waiters, string MaxState, string MaxWait);
+public sealed record AlarmRowView(string Database, int Blockers, int Waiters, string MaxTransaction, string MaxState, string MaxWait);
 
 /// <summary>One alarm level: its SQL text for the company form and what that SQL would return for the current sample.</summary>
 public sealed partial class AlarmTierViewModel : ObservableObject
@@ -23,7 +23,7 @@ public sealed partial class AlarmTierViewModel : ObservableObject
         _tier = tier;
         Sql = AlarmQuery.Sql(tier);
         Title = string.Create(CultureInfo.InvariantCulture,
-            $"{tier.Name}: bekleyen ≥ {(int)tier.WaiterMinWait.TotalSeconds} sn, bloklayan aynı durumda ≥ {(int)tier.BlockerMinState.TotalSeconds} sn");
+            $"{tier.Name}: bekleyen ≥ {(int)tier.WaiterMinWait.TotalSeconds} sn, bloklayanın transaction'ı ≥ {(int)tier.BlockerMinTransactionAge.TotalSeconds} sn açık");
     }
 
     public string Title { get; }
@@ -46,6 +46,7 @@ public sealed partial class AlarmTierViewModel : ObservableObject
         foreach (var r in rows)
         {
             Rows.Add(new AlarmRowView(Fmt.Db(r.Database, apps), r.Blockers, r.Waiters,
+                string.Create(CultureInfo.InvariantCulture, $"{r.MaxTransactionSeconds} sn"),
                 string.Create(CultureInfo.InvariantCulture, $"{r.MaxStateSeconds} sn"),
                 string.Create(CultureInfo.InvariantCulture, $"{r.MaxWaitSeconds} sn")));
         }

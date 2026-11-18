@@ -216,18 +216,33 @@ and add no query or session to the server.
 - The product owner is in the governance team and can request SQL alarms from the company monitoring team (form: SQL,
   read-only user, condition, frequency). The lock alarm is therefore also delivered as a SQL for that process, in
   addition to the local tool. The monitoring team's service account replaces the personal account.
-- Rule: a session that blocks a lock waiter (`pg_blocking_pids`), is not itself waiting for a lock, and has been in its
-  current state for at least N seconds, with a waiter that has waited at least M seconds. Result: one row per database of the
+- Rule: a session that blocks a lock waiter (`pg_blocking_pids`), is not itself waiting for a lock, and has had its
+  transaction open for at least N seconds, with a waiter that has waited at least M seconds. Result: one row per database of the
   blocker (the app name is derived from it). A single level, M=30 and N=120 (the product owner decided against a second
   level; the first version had an early and a critical level at 30/120 and 60/180). The product owner's existing
   practice is a 5-minute kill script in the apps, so the alarm stays below 5 minutes and fires first. It is first defined
   for the owner's own team at a low severity as a test, then raised.
-- Compared with the first query shown to the product owner, the final SQL adds the waiter condition (`w.query_start` at
-  least 30 s ago) and the column `en_uzun_bekleme_sn`, and has no trailing semicolon. Nothing was removed.
-- The rule uses the blocker's **state duration** (`state_change`), as observed by the product owner: a session stuck in
-  one state, typically `idle in transaction`, is the usual culprit. A waiter's own state duration only says how long it
-  has waited, so it is not used to find the culprit. Long-running but busy transactions (Subtrans-type) are not covered by this
-  rule; they need a separate transaction-age or Subtrans-wait alarm.
+- Compared with the first query shown to the product owner, the final SQL:
+  - adds the waiter condition (`w.query_start` at least 30 s ago);
+  - adds the columns `en_uzun_tx_sn` and `en_uzun_bekleme_sn`;
+  - has no trailing semicolon;
+  - tests the blocker's **transaction age** (`xact_start`) instead of its state duration (`state_change`).
+- Why transaction age, not state duration (2026-11-18, revised). The first version used the blocker's state duration, as
+  the product owner observed that stuck sessions are the usual culprit. Reviewing another AI's recursive query showed a gap:
+  a session that keeps running statements inside a long transaction resets `state_change` on every statement, so a
+  state-duration rule never fires, even though its row locks are held until the transaction ends. The first screenshot
+  shows exactly this (transaction open 1:43 h, state 1 s). Locks live as long as the transaction, so `xact_start` is the
+  closest available measure of "how long it has been locking". For an `idle in transaction` session
+  `xact_start <= state_change`, so every case the old rule caught is still caught. State duration stays as an output column
+  to tell stuck sessions (state ≈ transaction) from busy ones (state ≪ transaction).
+- Not taken from the recursive query:
+  - `pg_locks.waitstart`: it gives an exact wait start, but it means reading the whole lock table every minute, and the
+    docs warn about frequent reads. For Mendix row-lock waits `query_start` is close enough.
+  - The recursive chain walk: it only changes the waiter count, not when the alarm fires.
+  - The LEFT JOIN that keeps prepared transactions: they are not used here and have no session to report.
+  - Blocker SQL text, IP and user in the alarm: the product owner only needs the database name, and SQL text in an SCC
+    message raises data-classification questions.
+  Instead, that query is suggested as a manual detail query to run once after an alarm.
 - This SQL is **not** in `SqlCatalog` and the application never sends it to a server (SqlCatalog stays the only
   executable SQL). `AlarmQuery.Evaluate` mirrors it in C# for the demo preview tab, the scenario tests and a live
   cross-check. The mirror does not prove the SQL; a guard test only checks that the generated SQL is read-only.

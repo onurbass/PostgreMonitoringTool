@@ -368,6 +368,7 @@
                                     <DataGridTextColumn Header="veritabani" Binding="{Binding Database}" Width="*"/>
                                     <DataGridTextColumn Header="bloklayan__session" Binding="{Binding Blockers}"/>
                                     <DataGridTextColumn Header="bekleyen__session" Binding="{Binding Waiters}"/>
+                                    <DataGridTextColumn Header="en__uzun__tx__sn" Binding="{Binding MaxTransaction}"/>
                                     <DataGridTextColumn Header="en__uzun__durum__sn" Binding="{Binding MaxState}"/>
                                     <DataGridTextColumn Header="en__uzun__bekleme__sn" Binding="{Binding MaxWait}"/>
                                 </DataGrid.Columns>

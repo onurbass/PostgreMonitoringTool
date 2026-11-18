@@ -5,19 +5,22 @@ namespace PgMonitor.Core.Alarms;
 
 /// <summary>
 /// One alarm level of the company SQL alarm: a waiter must have waited at least <see cref="WaiterMinWait"/> and the
-/// session that blocks it must have been in its current state at least <see cref="BlockerMinState"/>.
+/// session that blocks it must have had its transaction open at least <see cref="BlockerMinTransactionAge"/>.
 /// </summary>
-public sealed record AlarmTier(string Name, TimeSpan WaiterMinWait, TimeSpan BlockerMinState)
+public sealed record AlarmTier(string Name, TimeSpan WaiterMinWait, TimeSpan BlockerMinTransactionAge)
 {
     /// <summary>
-    /// The alarm as requested: a waiter has waited at least 30 s and the session blocking it has been in its current state
-    /// at least 120 s. Stays well below the apps' 5-minute kill script, so the alarm fires before it.
+    /// The alarm as requested: a waiter has waited at least 30 s and the session blocking it has held its transaction (and so
+    /// its locks) at least 120 s. Stays well below the apps' 5-minute kill script, so the alarm fires before it.
     /// </summary>
     public static AlarmTier Standard { get; } = new("Lock alarmı", TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(120));
 }
 
 /// <summary>One result row of the alarm SQL: one row per database of the blocking session.</summary>
-public sealed record AlarmRow(string Database, int Blockers, int Waiters, int MaxStateSeconds, int MaxWaitSeconds);
+/// <param name="MaxTransactionSeconds">Longest open transaction among the blockers (how long locks may have been held).</param>
+/// <param name="MaxStateSeconds">Longest time a blocker has been in its current state; close to the transaction age means
+/// "stuck" (typically idle in transaction), much shorter means a busy long transaction.</param>
+public sealed record AlarmRow(string Database, int Blockers, int Waiters, int MaxTransactionSeconds, int MaxStateSeconds, int MaxWaitSeconds);
 
 /// <summary>
 /// The SQL the monitoring team runs on a schedule (company alarm form), plus an equivalent in C# that evaluates the same
@@ -31,6 +34,7 @@ public static class AlarmQuery
         SELECT b.datname                                            AS veritabani,
                count(DISTINCT b.pid)                                AS bloklayan_session,
                count(DISTINCT w.pid)                                AS bekleyen_session,
+               max(extract(epoch FROM now() - b.xact_start))::int   AS en_uzun_tx_sn,
                max(extract(epoch FROM now() - b.state_change))::int AS en_uzun_durum_sn,
                max(extract(epoch FROM now() - w.query_start))::int  AS en_uzun_bekleme_sn
         FROM pg_stat_activity w
@@ -39,7 +43,7 @@ public static class AlarmQuery
         WHERE w.wait_event_type = 'Lock'
           AND w.query_start < now() - interval '{W} seconds'
           AND b.wait_event_type IS DISTINCT FROM 'Lock'
-          AND b.state_change < now() - interval '{B} seconds'
+          AND b.xact_start < now() - interval '{B} seconds'
         GROUP BY b.datname
         """;
 
@@ -49,7 +53,7 @@ public static class AlarmQuery
         ArgumentNullException.ThrowIfNull(tier);
         return Template
             .Replace("{W}", Seconds(tier.WaiterMinWait), StringComparison.Ordinal)
-            .Replace("{B}", Seconds(tier.BlockerMinState), StringComparison.Ordinal);
+            .Replace("{B}", Seconds(tier.BlockerMinTransactionAge), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -68,14 +72,14 @@ public static class AlarmQuery
 
         var now = sample.SampledAt;
         var waiterCutoff = now - tier.WaiterMinWait;
-        var blockerCutoff = now - tier.BlockerMinState;
+        var blockerCutoff = now - tier.BlockerMinTransactionAge;
         var byPid = new Dictionary<int, SessionRow>();
         foreach (var s in sample.Sessions)
         {
             byPid.TryAdd(s.Pid, s);
         }
 
-        var pairs = new List<(SessionRow Waiter, SessionRow Blocker, DateTimeOffset WaitStart, DateTimeOffset StateStart)>();
+        var pairs = new List<(SessionRow Waiter, SessionRow Blocker, DateTimeOffset WaitStart, DateTimeOffset TxStart)>();
         foreach (var w in sample.Sessions)
         {
             if (w.IsRedacted || !w.IsWaitingOnLock || w.QueryStart is not { } waitStart || waitStart >= waiterCutoff)
@@ -93,11 +97,11 @@ public static class AlarmQuery
                 {
                     continue;
                 }
-                if (b.StateChange is not { } stateStart || stateStart >= blockerCutoff)
+                if (b.TransactionStart is not { } txStart || txStart >= blockerCutoff)
                 {
                     continue;
                 }
-                pairs.Add((w, b, waitStart, stateStart));
+                pairs.Add((w, b, waitStart, txStart));
             }
         }
 
@@ -108,7 +112,8 @@ public static class AlarmQuery
                 g.Key,
                 g.Select(p => p.Blocker.Pid).Distinct().Count(),
                 g.Select(p => p.Waiter.Pid).Distinct().Count(),
-                g.Max(p => Rounded(now - p.StateStart)),
+                g.Max(p => Rounded(now - p.TxStart)),
+                g.Max(p => Rounded(now - (p.Blocker.StateChange ?? p.TxStart))),
                 g.Max(p => Rounded(now - p.WaitStart))))
             .ToList();
     }
