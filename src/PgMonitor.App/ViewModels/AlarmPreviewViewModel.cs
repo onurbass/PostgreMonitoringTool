@@ -13,16 +13,14 @@ public sealed record AlarmRowView(string Database, int Blockers, int Waiters, st
 public sealed partial class AlarmTierViewModel : ObservableObject
 {
     private readonly AlarmTier _tier;
-    private readonly bool _critical;
 
     [ObservableProperty] private string _status = "-";
-    [ObservableProperty] private string _statusKind = "Info"; // Ok | Warn | Bad | Info
+    [ObservableProperty] private string _statusKind = "Info"; // Ok | Bad | Info
 
-    public AlarmTierViewModel(AlarmTier tier, bool critical)
+    public AlarmTierViewModel(AlarmTier tier)
     {
         ArgumentNullException.ThrowIfNull(tier);
         _tier = tier;
-        _critical = critical;
         Sql = AlarmQuery.Sql(tier);
         Title = string.Create(CultureInfo.InvariantCulture,
             $"{tier.Name}: bekleyen ≥ {(int)tier.WaiterMinWait.TotalSeconds} sn, bloklayan aynı durumda ≥ {(int)tier.BlockerMinState.TotalSeconds} sn");
@@ -60,7 +58,7 @@ public sealed partial class AlarmTierViewModel : ObservableObject
         else
         {
             Status = "ALARM ÇALAR – " + string.Join(", ", rows.Select(r => Fmt.Db(r.Database, apps)));
-            StatusKind = _critical ? "Bad" : "Warn";
+            StatusKind = "Bad";
         }
     }
 }
@@ -75,8 +73,7 @@ public sealed partial class AlarmPreviewViewModel : ObservableObject
 
     [ObservableProperty] private string _note = Intro;
 
-    public AlarmTierViewModel Early { get; } = new(AlarmTier.Early, critical: false);
-    public AlarmTierViewModel Critical { get; } = new(AlarmTier.Critical, critical: true);
+    public AlarmTierViewModel Alarm { get; } = new(AlarmTier.Standard);
 
     public void Apply(MonitorSnapshot s, IReadOnlyDictionary<string, string> apps)
     {
@@ -85,8 +82,7 @@ public sealed partial class AlarmPreviewViewModel : ObservableObject
         {
             return;
         }
-        Early.Apply(sample, apps);
-        Critical.Apply(sample, apps);
+        Alarm.Apply(sample, apps);
         Note = sample.Succeeded && sample.Visibility != Visibility.Full
             ? Intro + "\n\nKISMİ GÖRÜNÜRLÜK: yetkisiz hesapta gizli kalan session'lar şirket sorgusuna da görünmez; o session'lardaki lock'lar için alarm çalmaz."
             : Intro;

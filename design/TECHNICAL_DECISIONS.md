@@ -218,8 +218,12 @@ and add no query or session to the server.
   addition to the local tool. The monitoring team's service account replaces the personal account.
 - Rule: a session that blocks a lock waiter (`pg_blocking_pids`), is not itself waiting for a lock, and has been in its
   current state for at least N seconds, with a waiter that has waited at least M seconds. Result: one row per database of the
-  blocker (the app name is derived from it). Two levels: early (M=30, N=120) and critical (M=60, N=180). The product owner's
-  existing practice is a 5-minute kill script in the apps, so both levels stay below 5 minutes and fire first.
+  blocker (the app name is derived from it). A single level, M=30 and N=120 (the product owner decided against a second
+  level; the first version had an early and a critical level at 30/120 and 60/180). The product owner's existing
+  practice is a 5-minute kill script in the apps, so the alarm stays below 5 minutes and fires first. It is first defined
+  for the owner's own team at a low severity as a test, then raised.
+- Compared with the first query shown to the product owner, the final SQL adds the waiter condition (`w.query_start` at
+  least 30 s ago) and the column `en_uzun_bekleme_sn`, and has no trailing semicolon. Nothing was removed.
 - The rule uses the blocker's **state duration** (`state_change`), as observed by the product owner: a session stuck in
   one state, typically `idle in transaction`, is the usual culprit. A waiter's own state duration only says how long it
   has waited, so it is not used to find the culprit. Long-running but busy transactions (Subtrans-type) are not covered by this
@@ -227,7 +231,7 @@ and add no query or session to the server.
 - This SQL is **not** in `SqlCatalog` and the application never sends it to a server (SqlCatalog stays the only
   executable SQL). `AlarmQuery.Evaluate` mirrors it in C# for the demo preview tab, the scenario tests and a live
   cross-check. The mirror does not prove the SQL; a guard test only checks that the generated SQL is read-only.
-- Scenario tests simulate a once-a-minute poll. Findings: a single-sample blip fires the early level once, and flapping
+- Scenario tests simulate a once-a-minute poll. Findings: a single-sample blip fires the alarm once, and flapping
   short chains fire it in isolated minutes only. Hence the recommendation to ask for "N consecutive checks".
 - Hidden sessions (no `pg_read_all_stats`) are invisible to the SQL, so the alarm stays silent for them; the service account
   needs `pg_monitor`.

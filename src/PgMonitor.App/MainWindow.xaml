@@ -357,7 +357,6 @@
                                         <Setter Property="Background" Value="{StaticResource Accent}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding StatusKind}" Value="Ok"><Setter Property="Background" Value="{StaticResource Ok}"/></DataTrigger>
-                                            <DataTrigger Binding="{Binding StatusKind}" Value="Warn"><Setter Property="Background" Value="{StaticResource Warn}"/></DataTrigger>
                                             <DataTrigger Binding="{Binding StatusKind}" Value="Bad"><Setter Property="Background" Value="{StaticResource Bad}"/></DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -383,11 +382,7 @@
                         <TextBlock Style="{StaticResource H2}" Margin="0,0,0,2" Text="Şirket alarm sorgusu: bu veriyle ne döndürürdü?"/>
                         <TextBlock Foreground="{StaticResource Muted}" TextWrapping="Wrap" Text="{Binding Note}" Margin="0,0,0,8"/>
                     </StackPanel>
-                    <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                        <ContentControl Content="{Binding Early}"/>
-                        <ContentControl Grid.Column="2" Content="{Binding Critical}"/>
-                    </Grid>
+                    <ContentControl Content="{Binding Alarm}"/>
                 </DockPanel>
             </TabItem>
 

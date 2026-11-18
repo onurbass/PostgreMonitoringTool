@@ -9,11 +9,11 @@ namespace PgMonitor.Core.Alarms;
 /// </summary>
 public sealed record AlarmTier(string Name, TimeSpan WaiterMinWait, TimeSpan BlockerMinState)
 {
-    /// <summary>Early warning (lower severity, governance team).</summary>
-    public static AlarmTier Early { get; } = new("Erken uyarı", TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(120));
-
-    /// <summary>Critical (SCC is notified). Stays below the apps' 5-minute kill script so the alarm fires before it.</summary>
-    public static AlarmTier Critical { get; } = new("Kritik", TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(180));
+    /// <summary>
+    /// The alarm as requested: a waiter has waited at least 30 s and the session blocking it has been in its current state
+    /// at least 120 s. Stays well below the apps' 5-minute kill script, so the alarm fires before it.
+    /// </summary>
+    public static AlarmTier Standard { get; } = new("Lock alarmı", TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(120));
 }
 
 /// <summary>One result row of the alarm SQL: one row per database of the blocking session.</summary>

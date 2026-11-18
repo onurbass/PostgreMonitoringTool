@@ -74,7 +74,7 @@ public partial class AlarmQueryTests
             LockWaiter(200, T0, TimeSpan.FromSeconds(40), blockedBy: 100),
             LockWaiter(201, T0, TimeSpan.FromSeconds(45), blockedBy: 100));
 
-        var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Early));
+        var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Standard));
 
         Assert.Equal(new AlarmRow("app_orchid_db", 1, 2, 300, 45), row);
     }
@@ -84,8 +84,8 @@ public partial class AlarmQueryTests
     {
         var young = Sample(T0, Blocker(100, T0, TimeSpan.FromSeconds(119)), LockWaiter(200, T0, TimeSpan.FromSeconds(60), blockedBy: 100));
         var brief = Sample(T0, Blocker(100, T0, TimeSpan.FromMinutes(5)), LockWaiter(200, T0, TimeSpan.FromSeconds(29), blockedBy: 100));
-        Assert.Empty(AlarmQuery.Evaluate(young, AlarmTier.Early));
-        Assert.Empty(AlarmQuery.Evaluate(brief, AlarmTier.Early));
+        Assert.Empty(AlarmQuery.Evaluate(young, AlarmTier.Standard));
+        Assert.Empty(AlarmQuery.Evaluate(brief, AlarmTier.Standard));
     }
 
     [Fact]
@@ -93,8 +93,8 @@ public partial class AlarmQueryTests
     {
         var atLimit = Sample(T0, Blocker(100, T0, TimeSpan.FromSeconds(120)), LockWaiter(200, T0, TimeSpan.FromSeconds(30), blockedBy: 100));
         var over = Sample(T0, Blocker(100, T0, TimeSpan.FromSeconds(121)), LockWaiter(200, T0, TimeSpan.FromSeconds(31), blockedBy: 100));
-        Assert.Empty(AlarmQuery.Evaluate(atLimit, AlarmTier.Early));
-        Assert.Single(AlarmQuery.Evaluate(over, AlarmTier.Early));
+        Assert.Empty(AlarmQuery.Evaluate(atLimit, AlarmTier.Standard));
+        Assert.Single(AlarmQuery.Evaluate(over, AlarmTier.Standard));
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public partial class AlarmQueryTests
             LockWaiter(200, T0, TimeSpan.FromSeconds(90), blockedBy: 100),
             LockWaiter(300, T0, TimeSpan.FromSeconds(60), blockedBy: 200));
 
-        var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Early));
+        var row = Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Standard));
         Assert.Equal(1, row.Blockers);
         Assert.Equal(1, row.Waiters);
     }
@@ -117,7 +117,7 @@ public partial class AlarmQueryTests
         var s = Sample(T0,
             Blocker(100, T0, TimeSpan.FromMinutes(4), state: "active"),
             LockWaiter(200, T0, TimeSpan.FromSeconds(40), blockedBy: 100));
-        Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Early)); // wait_event_type NULL passes IS DISTINCT FROM 'Lock'
+        Assert.Single(AlarmQuery.Evaluate(s, AlarmTier.Standard)); // wait_event_type NULL passes IS DISTINCT FROM 'Lock'
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public partial class AlarmQueryTests
             Blocker(300, T0, TimeSpan.FromMinutes(9), "app_lotus_db"),
             LockWaiter(400, T0, TimeSpan.FromSeconds(50), "app_lotus_db", 300));
 
-        Assert.Equal(["app_lotus_db", "app_orchid_db"], AlarmQuery.Evaluate(s, AlarmTier.Early).Select(r => r.Database));
+        Assert.Equal(["app_lotus_db", "app_orchid_db"], AlarmQuery.Evaluate(s, AlarmTier.Standard).Select(r => r.Database));
     }
 
     [Fact]
@@ -141,13 +141,13 @@ public partial class AlarmQueryTests
             LockWaiter(200, T0, TimeSpan.FromSeconds(40), blockedBy: 100),   // blocker row is redacted
             LockWaiter(201, T0, TimeSpan.FromSeconds(40), blockedBy: 0),     // prepared transaction
             LockWaiter(202, T0, TimeSpan.FromSeconds(40), blockedBy: 999));  // not in the sample
-        Assert.Empty(AlarmQuery.Evaluate(s, AlarmTier.Early));
+        Assert.Empty(AlarmQuery.Evaluate(s, AlarmTier.Standard));
     }
 
     [Fact]
     public void Failed_sample_gives_nothing()
     {
-        Assert.Empty(AlarmQuery.Evaluate(ClusterSample.Failed(T0, CollectFailureKind.Timeout), AlarmTier.Early));
+        Assert.Empty(AlarmQuery.Evaluate(ClusterSample.Failed(T0, CollectFailureKind.Timeout), AlarmTier.Standard));
     }
 
     // ------------------------------------------------------------------ polling the scenarios once a minute
@@ -174,50 +174,44 @@ public partial class AlarmQueryTests
     [Fact]
     public void S01_healthy_day_never_fires_either_level()
     {
-        Assert.Empty(FiringMinutes(Scenarios.S01HealthyDay, AlarmTier.Early));
-        Assert.Empty(FiringMinutes(Scenarios.S01HealthyDay, AlarmTier.Critical));
+        Assert.Empty(FiringMinutes(Scenarios.S01HealthyDay, AlarmTier.Standard));
     }
 
     [Fact]
-    public void S05_lock_chain_fires_early_at_6_min_critical_at_7_min_and_stops_after_the_cleanup()
+    public void S05_lock_chain_fires_at_minute_6_while_the_blocker_is_far_from_the_5_minute_kill_limit_and_stops_after_the_cleanup()
     {
         var s = Scenarios.S05LockChain;
-        var early = FiringMinutes(s, AlarmTier.Early);
-        var critical = FiringMinutes(s, AlarmTier.Critical);
 
-        Assert.Equal(Enumerable.Range(6, 9), early);       // minutes 6..14; the DBA cleanup is at 15
-        Assert.Equal(Enumerable.Range(7, 8), critical);    // minutes 7..14
-        Assert.True(early[0] * 60 < 5 * 60 + 5 * 60, "before the apps' own 5-minute kill script would act on the session");
+        Assert.Equal(Enumerable.Range(6, 9), FiringMinutes(s, AlarmTier.Standard)); // minutes 6..14; the DBA cleanup is at 15
 
-        var first = PollScenario(s, AlarmTier.Early).First(p => p.Rows.Count > 0).Rows.Single();
+        var first = PollScenario(s, AlarmTier.Standard).First(p => p.Rows.Count > 0).Rows.Single();
         Assert.Equal("app_orchid_db", first.Database);
         Assert.Equal(1, first.Blockers);
         Assert.Equal(3, first.Waiters);             // the 5 second-level waiters wait for a waiter, not for the root
         Assert.Equal(149, first.MaxStateSeconds);
         Assert.Equal(60, first.MaxWaitSeconds);
+        Assert.True(first.MaxStateSeconds < 300, "the alarm comes before the apps' own 5-minute kill script acts");
     }
 
     [Fact]
-    public void S02_single_blip_fires_early_once_and_never_critical()
+    public void S02_single_blip_fires_once()
     {
-        Assert.Equal([10], FiringMinutes(Scenarios.S02SingleBlip, AlarmTier.Early));
-        Assert.Empty(FiringMinutes(Scenarios.S02SingleBlip, AlarmTier.Critical));
+        Assert.Equal([10], FiringMinutes(Scenarios.S02SingleBlip, AlarmTier.Standard));
     }
 
     [Fact]
     public void S04_flapping_fires_in_isolated_minutes_only_so_two_checks_in_a_row_would_suppress_all_of_them()
     {
-        var early = FiringMinutes(Scenarios.S04Flapping, AlarmTier.Early);
-        Assert.Equal([7, 14, 21, 28], early);
-        Assert.DoesNotContain(early, m => early.Contains(m + 1)); // never two consecutive polls
-        Assert.Empty(FiringMinutes(Scenarios.S04Flapping, AlarmTier.Critical));
+        var fired = FiringMinutes(Scenarios.S04Flapping, AlarmTier.Standard);
+        Assert.Equal([7, 14, 21, 28], fired);
+        Assert.DoesNotContain(fired, m => fired.Contains(m + 1)); // never two consecutive polls
     }
 
     [Fact]
     public void S06_partial_visibility_hides_the_chain_of_the_other_user_and_the_alarm_stays_silent()
     {
-        var early = FiringMinutes(Scenarios.S06PartialVisibility, AlarmTier.Early);
-        Assert.DoesNotContain(early, m => m is >= 5 and < 10);   // hidden chain in the other user's database
-        Assert.Equal(16, early[0]);                              // the visible chain (15-20 min) is found
+        var fired = FiringMinutes(Scenarios.S06PartialVisibility, AlarmTier.Standard);
+        Assert.DoesNotContain(fired, m => m is >= 5 and < 10);   // hidden chain in the other user's database
+        Assert.Equal(16, fired[0]);                              // the visible chain (15-20 min) is found
     }
 }

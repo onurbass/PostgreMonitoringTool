@@ -5,29 +5,21 @@ Burada sunucu, kullanıcı ya da veritabanı adı yoktur; `<...>` ile gösterile
 
 ## Ne yapacak
 
-İzleme sistemi aşağıdaki SQL'i **dakikada bir** çalıştırır. Sorgu, şu soruyu sorar:
+İzleme sistemi aşağıdaki SQL'i **dakikada bir** çalıştırır. Sorgu şu soruyu sorar:
 
-> Lock yüzünden birini bekleten ve kendisi 2 (ya da 3) dakikadan uzun süredir aynı durumda takılı kalmış bir session var mı?
-> Varsa hangi veritabanında (yani hangi uygulamada)?
+> Lock yüzünden birini **30 saniyeden uzun** süredir bekleten ve kendisi **120 saniyeden uzun** süredir aynı durumda
+> takılı kalmış bir session var mı? Varsa hangi veritabanında (yani hangi uygulamada)?
 
 - **Sorun yokken sorgu satır döndürmez**, sadece başlıklar gelir.
 - Sorun varsa **bloklayan session'ın veritabanı başına bir satır** döner. Veritabanı adı kaynak uygulamayı verir.
 - Tek bir sorgu cluster'daki tüm uygulamaları kapsar; uygulama başına ayrı alarm gerekmez.
 - Alarm yalnızca haber verir. Hiçbir session'ı sonlandırmaz; uygulamaların kendi 5 dakikalık script'i aynen devam eder.
-  Alarm bu script'ten **önce** çalar (aşağıdaki eşikler bu yüzden 5 dakikanın altında).
+  Alarm bu script'ten **önce** çalar: bloklayan session 120 saniyeye ulaştıktan sonraki ilk kontrolde, yani en geç yaklaşık
+  3 dakikada.
 
-## İki alarm: aynı SQL, iki eşik
+## SQL
 
-| | Erken uyarı | Kritik |
-|---|---|---|
-| Bekleyen en az | 30 sn bekledi | 60 sn bekledi |
-| Bloklayan aynı durumda en az | 120 sn | 180 sn |
-| Önem | SCC'ye gitmeyen düşük seviye (governance ekibine) | **Critical** (SCC haberdar edilir) |
-
-Eşikler başlangıç önerisidir; ilk hafta izleyip ayarlanır. Uygulamanın **Alarm önizleme** sekmesi iki seviyenin demo ya da
-canlı veride ne döndüreceğini gösterir.
-
-### SQL: erken uyarı
+Tek seviye vardır (bekleyen ≥ 30 sn, bloklayan aynı durumda ≥ 120 sn):
 
 ```sql
 SELECT b.datname                                            AS veritabani,
@@ -45,21 +37,33 @@ WHERE w.wait_event_type = 'Lock'
 GROUP BY b.datname
 ```
 
-### SQL: kritik
+Sondaki noktalı virgül bilerek konmadı; aracın kabul ediyorsa eklenebilir, fark etmez.
 
-Yukarıdakiyle aynıdır; yalnızca iki sayı değişir: `interval '30 seconds'` → `interval '60 seconds'` ve
-`interval '120 seconds'` → `interval '180 seconds'`.
+### Sorgu adım adım
+
+1. `w` = **bekleyen**: şu an bir lock'u bekleyen session (`wait_event_type = 'Lock'`) ve en az 30 saniyedir bekliyor.
+2. `pg_blocking_pids(w.pid)` her bekleyen için "seni kim blokluyor?" diye sorar; `unnest` bu listeyi satırlara açar.
+3. `b` = **bloklayan**: bulunan PID'nin kendi satırı.
+4. `b.wait_event_type IS DISTINCT FROM 'Lock'`: bloklayanın kendisi lock beklemesin; böylece zincirin ortasındakiler elenir,
+   **zincirin başı** kalır. (`IS DISTINCT FROM` kullanıldı, çünkü lock beklemeyen bir session'ın bekleme türü boş olabilir.)
+5. `b.state_change < now() - 120 s`: bloklayan **120 saniyeden uzun süredir aynı durumda** (`idle in transaction` ise
+   hareketsiz, `active` ise aynı sorgu çalışıyor).
+6. `GROUP BY b.datname`: sonuç, bloklayanın veritabanı başına tek satır.
+
+Sütunlar: `bloklayan_session` (o veritabanındaki farklı bloklayıcı sayısı), `bekleyen_session` (onları **doğrudan**
+bekleyen farklı session sayısı), `en_uzun_durum_sn` (bloklayanın aynı durumda en uzun kaldığı süre) ve
+`en_uzun_bekleme_sn` (bekleyenin en uzun bekleme süresi).
 
 ## Form alanları
 
 | Alan | Değer |
 |---|---|
 | İzleme İstek Tipi | SQL İzleme (Otomasyon) |
-| Alarm Adı | `PostgreSQL Lock – Kritik: takılı session başkasını bekletiyor` (erken uyarı için: `… – Erken Uyarı`) |
-| Alarm Kritiklik Seviyesi | Kritik alarm: **Critical**. Erken uyarı: SCC'ye gitmeyen düşük seviye |
+| Alarm Adı | `PostgreSQL Lock: takılı session başkasını bekletiyor` |
+| Alarm Kritiklik Seviyesi | Test aşamasında: SCC'ye gitmeyen düşük seviye. Canlıya alırken **Critical** |
 | Veritabanı Tipi | PostgreSQL |
 | Veritabanı Bağlantı Url'i | `jdbc:postgresql://<sunucu>:<port>/<veritabanı>` (cluster'daki herhangi bir veritabanı; `pg_stat_activity` hepsini gösterir) |
-| SQL | Yukarıdaki SQL (alarm başına bir tane) |
+| SQL | Yukarıdaki SQL |
 | Veritabanı read-only user | İzleme ekibinin servis hesabı. **`pg_monitor` (ya da `pg_read_all_stats`) rolü gerekir**, aksi halde başka kullanıcıların session'ları gizli gelir ve alarm sessizce boş döner |
 | Alarm Koşulu | `bloklayan_session > 0` (sorgu satır döndürmüyorsa "alarm yok" sayılmalı; bkz. sorular) |
 | Çalışma Sıklığı | 1 dk |
@@ -67,10 +71,10 @@ Yukarıdakiyle aynıdır; yalnızca iki sayı değişir: `interval '30 seconds'`
 
 ### İstek açıklaması (öneri)
 
-> Ortak PostgreSQL cluster'ında bir session, başka session'ları lock ile bekletiyor ve 2 dakikadan uzun süredir aynı
-> durumda (genellikle `idle in transaction`) takılı kalmış. Sorgu, bloklayan session'ın veritabanını döndürür; veritabanı
-> adı kaynak uygulamayı gösterir. Amaç, uygulama ekipleri haber vermeden önce lock kaynağı olan uygulamayı bulmak ve
-> ilgili ekibi bilgilendirmektir.
+> Ortak PostgreSQL cluster'ında bir session, başka session'ları 30 saniyeden uzun süredir lock ile bekletiyor ve kendisi
+> 2 dakikadan uzun süredir aynı durumda (genellikle `idle in transaction`) takılı kalmış. Sorgu, bloklayan session'ın
+> veritabanını döndürür; veritabanı adı kaynak uygulamayı gösterir. Amaç, uygulama ekipleri haber vermeden önce lock
+> kaynağı olan uygulamayı bulmak ve ilgili ekibi bilgilendirmektir.
 
 ### Alarm mesajı (öneri)
 
@@ -83,6 +87,19 @@ Yukarıdakiyle aynıdır; yalnızca iki sayı değişir: `interval '30 seconds'`
 > 2. İlgili uygulama ekibine ve DB ekibine "bu veritabanında bir session başkalarını bekletiyor" diye bildirin.
 > 3. Session sonlandırma kararı uygulama ve DB ekibine aittir; SCC müdahale etmez.
 > 4. Alarm art arda sürüyorsa üst seviyeye yükseltin.
+
+## Test aşaması (önce kendi ekibine)
+
+1. Alarmı düşük seviyede, yalnızca kendi ekibine bildirim gidecek şekilde tanımlat.
+2. Aşağıdaki "Doğrulama" adımlarını uygula.
+3. Birkaç gün normal çalıştır. Bu sürede şunlara bak:
+   - **Hiç alarm gelmiyorsa:** normaldir. Yetki sorununu (aşağıda 1. adım) elemek için doğrulama testini yap.
+   - **Gereksiz alarm geliyorsa:** hangi bloklayan durumunda geldiğine bak (`idle in transaction` mı, `active` mi). Uzun çalışan
+     meşru bir toplu işlem (`active`) alarmı tetikliyorsa, sadece `idle in transaction` olanlara daralt: `b.state_change`
+     satırının altına `AND b.state = 'idle in transaction'` ekle. Bu, aktif ama çok uzun süren sorguları artık yakalamaz;
+     hangisini istediğine sen karar ver.
+   - **Anlık, kendiliğinden geçen takılmalar alarm üretiyorsa:** izleme ekibinden "art arda 2 kontrolde" koşulunu iste.
+4. Memnun kalınca seviyeyi **Critical** yap.
 
 ## İzleme ekibine sorulacaklar
 
@@ -98,13 +115,15 @@ Yukarıdakiyle aynıdır; yalnızca iki sayı değişir: `interval '30 seconds'`
 
 | Senaryo | Sonuç |
 |---|---|
-| Sağlıklı gün (24 saat) | İki seviye de hiç çalmaz |
-| 10 dk süren zincir (idle in transaction kök, 3 doğrudan + 5 dolaylı bekleyen) | Erken uyarı 6. dakikada, kritik 7. dakikada çalar; temizlikten sonra susar |
-| Tek örneklik 40 sn'lik takılma | Erken uyarı **bir kez** çalar, kritik çalmaz |
-| 30 dk boyunca gelip giden kısa lock'lar | Erken uyarı yalnızca **birbirinden ayrı** dört dakikada çalar, kritik hiç çalmaz. "Art arda 2 kontrol" koşulu bunların hepsini eler |
+| Sağlıklı gün (24 saat) | Hiç çalmaz |
+| 10 dk süren zincir (idle in transaction kök, 3 doğrudan + 5 dolaylı bekleyen) | 6. dakikada çalar (bloklayan o an 149 sn takılı, yani 5 dakikalık script'ten önce); temizlikten sonra susar |
+| Tek örneklik 40 sn'lik takılma | **Bir kez** çalar |
+| 30 dk boyunca gelip giden kısa lock'lar | Yalnızca **birbirinden ayrı** dört dakikada çalar. "Art arda 2 kontrol" koşulu bunların hepsini eler |
 | Başka kullanıcının gizli session'ları | Alarm **sessiz kalır**; yalnızca görünen zincir bulunur |
 
 Bu yüzden iki şey önemli: **art arda kontrol koşulu** (varsa kullanın) ve **servis hesabında yetki**.
+
+Uygulamanın **Alarm önizleme** sekmesi bu kuralı demo ya da canlı örnek üzerinde gösterir; veritabanına ek sorgu göndermez.
 
 ## Doğrulama
 
@@ -141,14 +160,14 @@ SELECT pg_advisory_xact_lock(7340001);
 SELECT pg_advisory_xact_lock(7340001);
 ```
 
-2,5–3 dakika sonra **üçüncü bir pencerede** alarm SQL'ini çalıştır:
-- Erken uyarı sorgusu (120/30 sn): yaklaşık 2 dakika sonra tek satır döner; `veritabani` bağlandığın veritabanı olmalıdır.
-- Kritik sorgu (180/60 sn): yaklaşık 3 dakika sonra satır döner.
+Yaklaşık 2,5 dakika sonra **üçüncü bir pencerede** alarm SQL'ini çalıştır: tek satır dönmelidir; `veritabani`, bağlandığın
+veritabanı olmalıdır. Şirketin alarmı tanımlıysa bir dakika içinde bildirim de gelmelidir.
 
 Testi bitirmek için: Pencere 2'deki sorguyu iptal et, Pencere 1'de `ROLLBACK;` çalıştır.
 
-Dikkat: bu gerçek bir (zararsız) lock bekleyişidir; DB ekibi görebilir. Alarm daha önce devreye alınmışsa tetiklenebilir; testi
+Dikkat: bu gerçek (zararsız) bir lock bekleyişidir; DB ekibi görebilir. Alarm daha önce devreye alınmışsa tetiklenebilir; testi
 başlatmadan önce haber ver. Uygulamaların 5 dakikalık script'i test session'larını da sonlandırabilir; testi 4 dakika içinde bitir.
+Bu advisory lock testi henüz gerçek bir PostgreSQL'de denenmedi.
 
 ## Bilinen sınırlar
 

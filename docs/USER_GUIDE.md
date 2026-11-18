@@ -458,7 +458,8 @@ bilgilerini paylaşmadan önce kontrol et.
 
 Şirketin SQL alarm sistemi (izleme ekibi) için hazırlanan lock alarm sorgusu [ALARM_REQUEST.md](ALARM_REQUEST.md)
 belgesindedir. Ana penceredeki **Alarm önizleme** sekmesi bu sorgunun kuralını, uygulamanın o an elindeki örneğe uygulayıp
-"alarm çalar mı, hangi veritabanı için" sorusunu iki seviyede (erken uyarı, kritik) gösterir.
+"alarm çalar mı, hangi veritabanı için" sorusunu gösterir. Alarm tek seviyedir: bekleyen en az 30 sn bekledi, bloklayan
+en az 120 sn aynı durumda.
 
 - Veritabanına **ek sorgu göndermez** ve alarm üretmez; yalnızca mevcut örneği yorumlar.
 - Demo modunda senaryoları (örn. S05) izleyerek alarmın ne zaman çalacağını görebilirsin.
