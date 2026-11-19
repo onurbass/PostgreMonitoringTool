@@ -22,12 +22,12 @@ Burada sunucu, kullanıcı ya da veritabanı adı yoktur; `<...>` ile gösterile
 Tek seviye vardır (bekleyen ≥ 30 sn, bloklayanın transaction'ı ≥ 120 sn açık):
 
 ```sql
-SELECT b.datname                                            AS veritabani,
-       count(DISTINCT b.pid)                                AS bloklayan_session,
-       count(DISTINCT w.pid)                                AS bekleyen_session,
-       max(extract(epoch FROM now() - b.xact_start))::int   AS en_uzun_tx_sn,
-       max(extract(epoch FROM now() - b.state_change))::int AS en_uzun_durum_sn,
-       max(extract(epoch FROM now() - w.query_start))::int  AS en_uzun_bekleme_sn
+SELECT b.datname                                            AS database_name,
+       count(DISTINCT b.pid)                                AS blocking_sessions,
+       count(DISTINCT w.pid)                                AS waiting_sessions,
+       max(extract(epoch FROM now() - b.xact_start))::int   AS max_blocker_tx_seconds,
+       max(extract(epoch FROM now() - b.state_change))::int AS max_blocker_state_seconds,
+       max(extract(epoch FROM now() - w.query_start))::int  AS max_wait_seconds
 FROM pg_stat_activity w
 CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) AS bp(pid)
 JOIN pg_stat_activity b ON b.pid = bp.pid
@@ -48,7 +48,7 @@ bir uygulama (ilk ekran görüntüsündeki gibi: transaction 1:43 saat açık, d
 **hiç tetiklemez**, oysa başkalarını saatlerce bekletir. Transaction süresi bu durumu yakalar. `idle in transaction` olarak
 takılı kalan session'ları da yakalar, çünkü onların transaction süresi her zaman durum süresinden uzundur.
 
-Durum süresi sonuçta yine gösterilir: `en_uzun_durum_sn` transaction süresine yakınsa session **takılı**dır (genelde
+Durum süresi sonuçta yine gösterilir: `max_blocker_state_seconds` transaction süresine yakınsa session **takılı**dır (genelde
 `idle in transaction`). Çok kısaysa session **çalışıyor ama transaction'ı uzun**dur.
 
 Sondaki noktalı virgül bilerek konmadı; aracın kabul ediyorsa eklenebilir, fark etmez.
@@ -64,9 +64,9 @@ Sondaki noktalı virgül bilerek konmadı; aracın kabul ediyorsa eklenebilir, f
    süredir tutuyor olabilir.
 6. `GROUP BY b.datname`: sonuç, bloklayanın veritabanı başına tek satır.
 
-Sütunlar: `bloklayan_session` (o veritabanındaki farklı bloklayıcı sayısı), `bekleyen_session` (onları **doğrudan**
-bekleyen farklı session sayısı), `en_uzun_tx_sn` (bloklayanın transaction'ının en uzun açık kaldığı süre),
-`en_uzun_durum_sn` (bloklayanın aynı durumda en uzun kaldığı süre) ve `en_uzun_bekleme_sn` (bekleyenin en uzun bekleme
+Sütunlar: `blocking_sessions` (o veritabanındaki farklı bloklayıcı sayısı), `waiting_sessions` (onları **doğrudan**
+bekleyen farklı session sayısı), `max_blocker_tx_seconds` (bloklayanın transaction'ının en uzun açık kaldığı süre),
+`max_blocker_state_seconds` (bloklayanın aynı durumda en uzun kaldığı süre) ve `max_wait_seconds` (bekleyenin en uzun bekleme
 süresi).
 
 ## Form alanları
@@ -80,7 +80,7 @@ süresi).
 | Veritabanı Bağlantı Url'i | `jdbc:postgresql://<sunucu>:<port>/<veritabanı>` (cluster'daki herhangi bir veritabanı; `pg_stat_activity` hepsini gösterir) |
 | SQL | Yukarıdaki SQL |
 | Veritabanı read-only user | İzleme ekibinin servis hesabı. **`pg_monitor` (ya da `pg_read_all_stats`) rolü gerekir**, aksi halde başka kullanıcıların session'ları gizli gelir ve alarm sessizce boş döner |
-| Alarm Koşulu | `bloklayan_session > 0` (sorgu satır döndürmüyorsa "alarm yok" sayılmalı; bkz. sorular) |
+| Alarm Koşulu | `blocking_sessions > 0` (sorgu satır döndürmüyorsa "alarm yok" sayılmalı; bkz. sorular) |
 | Çalışma Sıklığı | 1 dk |
 | Çalışma Aralığı | 7/24 |
 
@@ -93,8 +93,8 @@ süresi).
 
 ### Alarm mesajı (öneri)
 
-> `<veritabani>` veritabanında `<bekleyen_session>` session, en uzun `<en_uzun_bekleme_sn>` sn'dir lock bekliyor.
-> Bekleten `<bloklayan_session>` session'ın transaction'ı `<en_uzun_tx_sn>` sn'dir açık, `<en_uzun_durum_sn>` sn'dir aynı
+> `<database_name>` veritabanında `<waiting_sessions>` session, en uzun `<max_wait_seconds>` sn'dir lock bekliyor.
+> Bekleten `<blocking_sessions>` session'ın transaction'ı `<max_blocker_tx_seconds>` sn'dir açık, `<max_blocker_state_seconds>` sn'dir aynı
 > durumda (kök neden için şüpheli).
 
 ### Instruction – Event Management System (SCC için, öneri)
@@ -121,8 +121,8 @@ süresi).
 
 1. Sorgu satır döndürmezse (sorun yokken) bu "alarm yok" mu sayılıyor, yoksa hata mı oluyor? Hata oluyorsa, sorguyu her zaman
    tek satır dönecek biçimde yeniden yazarım.
-2. Koşul bir satır sayısına mı, bir sütun değerine mi bağlanıyor? Sütun adıyla (`bloklayan_session > 0`) verilebiliyor mu?
-3. Mesaja sorgu sonucundaki sütunlar (`veritabani`, süreler) eklenebiliyor mu? Veritabanı başına satır olduğu için alarm
+2. Koşul bir satır sayısına mı, bir sütun değerine mi bağlanıyor? Sütun adıyla (`blocking_sessions > 0`) verilebiliyor mu?
+3. Mesaja sorgu sonucundaki sütunlar (`database_name`, süreler) eklenebiliyor mu? Veritabanı başına satır olduğu için alarm
    **satır bazında** mı tetikleniyor?
 4. "Art arda N kontrolde koşul sağlanırsa alarm" tanımlanabiliyor mu? (Aşağıdaki "senaryolardan çıkanlar"a bakın.)
 5. DB ekibi servis hesabına `pg_monitor` rolünü verecek mi?
@@ -145,7 +145,7 @@ Uygulamanın **Alarm önizleme** sekmesi bu kuralı demo ya da canlı örnek üz
 ## Doğrulama
 
 Sorgunun ilk sürümü şirketteki PostgreSQL 15'te hata vermeden çalıştı; sorun yokken başlıklarla boş döndü. O sürümde bekleyen
-süresi şartı, `en_uzun_tx_sn` ve `en_uzun_bekleme_sn` sütunları yoktu ve bloklayan için `xact_start` yerine `state_change`
+süresi şartı, `max_blocker_tx_seconds` ve `max_wait_seconds` sütunları yoktu ve bloklayan için `xact_start` yerine `state_change`
 kullanılıyordu. **Bu belgedeki güncel sürüm henüz gerçek bir veritabanında çalıştırılmadı.** Önce bir kez çalıştırıp hata
 vermediğini görün. Davranışını denemek için:
 
@@ -178,7 +178,7 @@ SELECT pg_advisory_xact_lock(7340001);
 SELECT pg_advisory_xact_lock(7340001);
 ```
 
-Yaklaşık 2,5 dakika sonra **üçüncü bir pencerede** alarm SQL'ini çalıştır: tek satır dönmelidir; `veritabani`, bağlandığın
+Yaklaşık 2,5 dakika sonra **üçüncü bir pencerede** alarm SQL'ini çalıştır: tek satır dönmelidir; `database_name`, bağlandığın
 veritabanı olmalıdır. Şirketin alarmı tanımlıysa bir dakika içinde bildirim de gelmelidir.
 
 Testi bitirmek için: Pencere 2'deki sorguyu iptal et, Pencere 1'de `ROLLBACK;` çalıştır.

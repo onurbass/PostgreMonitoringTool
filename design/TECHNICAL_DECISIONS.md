@@ -224,7 +224,7 @@ and add no query or session to the server.
   for the owner's own team at a low severity as a test, then raised.
 - Compared with the first query shown to the product owner, the final SQL:
   - adds the waiter condition (`w.query_start` at least 30 s ago);
-  - adds the columns `en_uzun_tx_sn` and `en_uzun_bekleme_sn`;
+  - adds the columns `max_blocker_tx_seconds` and `max_wait_seconds`;
   - has no trailing semicolon;
   - tests the blocker's **transaction age** (`xact_start`) instead of its state duration (`state_change`).
 - Why transaction age, not state duration (2026-11-18, revised). The first version used the blocker's state duration, as

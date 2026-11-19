@@ -31,12 +31,12 @@ public sealed record AlarmRow(string Database, int Blockers, int Waiters, int Ma
 public static class AlarmQuery
 {
     private const string Template = """
-        SELECT b.datname                                            AS veritabani,
-               count(DISTINCT b.pid)                                AS bloklayan_session,
-               count(DISTINCT w.pid)                                AS bekleyen_session,
-               max(extract(epoch FROM now() - b.xact_start))::int   AS en_uzun_tx_sn,
-               max(extract(epoch FROM now() - b.state_change))::int AS en_uzun_durum_sn,
-               max(extract(epoch FROM now() - w.query_start))::int  AS en_uzun_bekleme_sn
+        SELECT b.datname                                            AS database_name,
+               count(DISTINCT b.pid)                                AS blocking_sessions,
+               count(DISTINCT w.pid)                                AS waiting_sessions,
+               max(extract(epoch FROM now() - b.xact_start))::int   AS max_blocker_tx_seconds,
+               max(extract(epoch FROM now() - b.state_change))::int AS max_blocker_state_seconds,
+               max(extract(epoch FROM now() - w.query_start))::int  AS max_wait_seconds
         FROM pg_stat_activity w
         CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) AS bp(pid)
         JOIN pg_stat_activity b ON b.pid = bp.pid

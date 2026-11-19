@@ -365,12 +365,12 @@
                             </Border>
                             <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding Rows}" Height="96">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="veritabani" Binding="{Binding Database}" Width="*"/>
-                                    <DataGridTextColumn Header="bloklayan__session" Binding="{Binding Blockers}"/>
-                                    <DataGridTextColumn Header="bekleyen__session" Binding="{Binding Waiters}"/>
-                                    <DataGridTextColumn Header="en__uzun__tx__sn" Binding="{Binding MaxTransaction}"/>
-                                    <DataGridTextColumn Header="en__uzun__durum__sn" Binding="{Binding MaxState}"/>
-                                    <DataGridTextColumn Header="en__uzun__bekleme__sn" Binding="{Binding MaxWait}"/>
+                                    <DataGridTextColumn Header="database__name" Binding="{Binding Database}" Width="*"/>
+                                    <DataGridTextColumn Header="blocking__sessions" Binding="{Binding Blockers}"/>
+                                    <DataGridTextColumn Header="waiting__sessions" Binding="{Binding Waiters}"/>
+                                    <DataGridTextColumn Header="max__blocker__tx__seconds" Binding="{Binding MaxTransaction}"/>
+                                    <DataGridTextColumn Header="max__blocker__state__seconds" Binding="{Binding MaxState}"/>
+                                    <DataGridTextColumn Header="max__wait__seconds" Binding="{Binding MaxWait}"/>
                                 </DataGrid.Columns>
                             </DataGrid>
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource Label}" Margin="0,10,0,0" Text="FORMDAKİ SQL ALANINA YAPIŞTIRILACAK METİN"/>

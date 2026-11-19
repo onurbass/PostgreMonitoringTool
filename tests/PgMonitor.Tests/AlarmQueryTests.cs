@@ -45,7 +45,7 @@ public partial class AlarmQueryTests
     [Fact]
     public void Alarm_sql_is_not_part_of_the_sql_the_application_can_run()
     {
-        Assert.DoesNotContain(PgMonitor.Infrastructure.Postgres.SqlCatalog.All.Values, v => v.Contains("en_uzun_durum_sn", StringComparison.Ordinal));
+        Assert.DoesNotContain(PgMonitor.Infrastructure.Postgres.SqlCatalog.All.Values, v => v.Contains("max_blocker_state_seconds", StringComparison.Ordinal));
     }
 
     [GeneratedRegex(@"^\s*\w+")]
